@@ -101,37 +101,51 @@ RegisterHub includes reference implementations covering diverse architectural pa
 
 ## Quickstart
 
-### 1. Prerequisites and Installation
+### 1. One-Command Deployment and Verification (Recommended)
+
+Local deployment prepares a Python environment for the RegisterHub CLI; it does not publish a server or open a listening port. With Python 3.10+ installed, run one command from a clean checkout:
 
 ```bash
-# Clone the repository
 git clone https://github.com/waw666waw666/RegisterHub.git
 cd RegisterHub
-
-# Install core dependencies
-pip install -r requirements.txt
-
-# Install Playwright browser binaries
-playwright install chromium
+python scripts/deploy_check.py
 ```
 
-### 2. Runtime Environment Diagnostics
+The checker creates or reuses the project `.venv`, re-executes with that interpreter, and runs these gates in order:
 
-Verify host configuration, proxy availability, and dependency health:
+| Stage | Behavior |
+| :--- | :--- |
+| `install` | Installs `requirements.txt` dependencies and the Playwright Chromium fallback browser |
+| `config` | Preserves an existing `config.json`; only when it is missing, derives one from `config.example.json` with `browser.headless=true` |
+| `doctor` | Runs `main.py doctor` to check dependencies, configuration, and browser health |
+| `pytest` | Runs the complete `pytest tests/` suite |
+| `demo` | Runs `main.py --run demo` in an isolated temporary working directory and requires non-empty credential data in its temporary `results/accounts.txt` |
+
+- **Browser preference**: The runner uses installed Google Chrome first and falls back to Playwright Chromium when Chrome is unavailable, so Chrome is not a hard requirement.
+- **Failure behavior**: The checker stops at the first failed blocking stage, prints its name, and exits non-zero. A zero demo subprocess exit code is insufficient; an empty isolated ledger also fails verification.
+- **Data isolation**: The demo forces headless mode and a temporary `output_dir`. Its directory and credentials are removed after verification. The normal `results/accounts.txt` and existing proxy, mailbox, and browser preferences are not modified.
+
+### 2. Prepared Machines: Skip Installation
+
+Avoid reinstalling dependencies and browser binaries on a prepared machine:
+
+```bash
+python scripts/deploy_check.py --skip-install
+```
+
+`--skip-install` skips **only** dependency and Playwright Chromium installation. Configuration preservation or derivation, `doctor`, the full test suite, the isolated demo, and the non-empty ledger gate still run. An unprepared environment fails at the corresponding later stage rather than reporting false success.
+
+### 3. Manual Steps (Optional)
+
+To run diagnostics, tests, or the offline demo separately, use the prepared project virtual environment:
 
 ```bash
 python main.py doctor
-```
-
-### 3. Baseline Verification
-
-Execute the self-contained offline verification target (requires no network or proxy):
-
-```bash
+python -m pytest tests/
 python main.py --run demo
 ```
 
-Resulting credentials and execution artifacts are written atomically to `results/accounts.txt`.
+A manual demo writes credentials atomically to the normal `results/accounts.txt`. It exercises only the offline adapter flow and **is not a complete deployment verification**; the one-command checker also gates diagnostics, tests, and a non-empty isolated ledger.
 
 ### 4. AI Agent Collaborative Development (Cursor / Claude Code / Windsurf / Gemini)
 
