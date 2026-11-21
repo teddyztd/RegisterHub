@@ -101,37 +101,51 @@ RegisterHub 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 
 ## 快速上手
 
-### 1. 环境准备与依赖安装
+### 1. 一键部署与验证（推荐）
+
+本地部署的目标是可运行 RegisterHub CLI 的 Python 环境，不是发布服务器或监听端口。准备 Python 3.10+ 后，从干净检出执行一条命令：
 
 ```bash
-# 克隆仓库
 git clone https://github.com/waw666waw666/RegisterHub.git
 cd RegisterHub
-
-# 安装 Python 生产依赖
-pip install -r requirements.txt
-
-# 安装 Playwright 浏览器内核
-playwright install chromium
+python scripts/deploy_check.py
 ```
 
-### 2. 环境健康自检
+检查器会创建或复用项目内 `.venv`，使用该环境的解释器继续执行，并按以下顺序验收：
 
-检测宿主机运行环境、代理可用性以及依赖完整性：
+| 阶段 | 实际行为 |
+| :--- | :--- |
+| `install` | 安装 `requirements.txt` 依赖与 Playwright Chromium 回退浏览器 |
+| `config` | 保留已有 `config.json`；仅在文件缺失时从 `config.example.json` 派生，并设置 `browser.headless=true` |
+| `doctor` | 执行 `main.py doctor`，检查依赖、配置与浏览器环境 |
+| `pytest` | 执行完整 `pytest tests/` 测试套件 |
+| `demo` | 在隔离的临时工作目录执行 `main.py --run demo`，并要求临时 `results/accounts.txt` 含非空凭据数据 |
+
+- **浏览器策略**：运行时优先使用已安装的 Google Chrome；Chrome 不可用时回退到 Playwright Chromium，因此不强制安装 Chrome。
+- **失败语义**：任一阻塞阶段失败即停止，输出失败阶段并以非零状态退出。Demo 子进程退出码为零还不够，隔离台账为空同样判定失败。
+- **数据隔离**：Demo 强制无头模式与临时 `output_dir`，验证后删除临时目录和凭据，不写入正常的 `results/accounts.txt`，也不改动已有代理、邮箱或浏览器配置。
+
+### 2. 已准备机器：跳过安装
+
+依赖和浏览器已就绪时，可避免重复安装：
+
+```bash
+python scripts/deploy_check.py --skip-install
+```
+
+`--skip-install` **只跳过**依赖与 Playwright Chromium 安装；配置保留或派生、`doctor`、完整测试、隔离 Demo 及非空台账门禁仍全部执行。环境未准备好时，后续对应阶段会失败，不会产生假成功。
+
+### 3. 手动分步执行（可选）
+
+只需单独诊断、跑测试或体验离线靶场时，可在已准备好的项目虚拟环境中执行：
 
 ```bash
 python main.py doctor
-```
-
-### 3. 基线自测验证
-
-执行内置离线靶场（无需外部网络或代理配置）：
-
-```bash
+python -m pytest tests/
 python main.py --run demo
 ```
 
-生成的凭据记录将自动以原子写入模式持久化至 `results/accounts.txt`。
+手动运行 Demo 会将凭据原子写入正常的 `results/accounts.txt`。它只验证离线适配器流程，**不等同于完整部署验收**；一键检查器还会验证诊断、测试以及隔离台账的非空结果。
 
 ### 4. AI 助手协同使用指南 (Cursor / Claude Code / Windsurf / Gemini)
 
