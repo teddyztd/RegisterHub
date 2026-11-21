@@ -40,36 +40,65 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
-def in_venv() -> bool:
-    return sys.prefix != sys.base_prefix
+def venv_dir() -> Path:
+    return REPO_ROOT / ".venv"
+
+
+def in_project_venv() -> bool:
+    """True only when running from this repository's own .venv.
+
+    An unrelated activated virtual environment must not be reused: dependencies
+    belong in the project .venv, so any other interpreter triggers re-exec.
+    """
+    try:
+        return Path(sys.prefix).resolve() == venv_dir().resolve()
+    except OSError:
+        return False
+
+
+def venv_interpreter() -> Path:
+    if os.name == "nt":
+        return venv_dir() / "Scripts" / "python.exe"
+    return venv_dir() / "bin" / "python"
 
 
 def ensure_venv() -> Path:
     """Create .venv when missing and return the interpreter inside it."""
-    if in_venv():
+    if in_project_venv():
         return Path(sys.executable)
-    venv_dir = REPO_ROOT / ".venv"
-    if os.name == "nt":
-        interpreter = venv_dir / "Scripts" / "python.exe"
-    else:
-        interpreter = venv_dir / "bin" / "python"
+    interpreter = venv_interpreter()
     if not interpreter.exists():
         log("[*] .venv not found; creating virtual environment...")
-        venv.create(str(venv_dir), with_pip=True)
+        try:
+            venv.create(str(venv_dir()), with_pip=True)
+        except OSError as exc:
+            raise StageFailure(STAGE_INSTALL, 1, f"cannot create .venv: {exc}")
+    if not interpreter.exists():
+        raise StageFailure(
+            STAGE_INSTALL, 1, f".venv interpreter is missing: {interpreter}"
+        )
     return interpreter
 
 
 def reexec_in_venv(interpreter: Path, argv) -> "NoReturn":  # noqa: F821
     script = Path(__file__).resolve()
-    result = subprocess.run([str(interpreter), str(script)] + list(argv), cwd=REPO_ROOT)
+    try:
+        result = subprocess.run(
+            [str(interpreter), str(script)] + list(argv), cwd=REPO_ROOT
+        )
+    except OSError as exc:
+        raise StageFailure(STAGE_INSTALL, 1, f"cannot re-execute in .venv: {exc}")
     raise SystemExit(result.returncode)
 
 
 def run_stage(stage: str, command, cwd: Path) -> None:
     log(f"==> [{stage}] {' '.join(str(part) for part in command)} (cwd: {cwd})")
-    result = subprocess.run(
-        [str(part) for part in command], cwd=cwd, check=False
-    )
+    try:
+        result = subprocess.run(
+            [str(part) for part in command], cwd=cwd, check=False
+        )
+    except OSError as exc:
+        raise StageFailure(stage, 1, f"cannot start process: {exc}")
     if result.returncode != 0:
         raise StageFailure(stage, result.returncode)
 
@@ -91,11 +120,36 @@ def derive_config() -> None:
         config = json.loads(example_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise StageFailure(STAGE_CONFIG, 1, f"cannot parse config.example.json: {exc}")
-    config.setdefault("browser", {})["headless"] = True
-    config_path.write_text(
-        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    if not isinstance(config, dict):
+        raise StageFailure(STAGE_CONFIG, 1, "config.example.json must be a JSON object")
+    browser = config.setdefault("browser", {})
+    if not isinstance(browser, dict):
+        raise StageFailure(STAGE_CONFIG, 1, "config.example.json 'browser' must be an object")
+    browser["headless"] = True
+    try:
+        config_path.write_text(
+            json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        raise StageFailure(STAGE_CONFIG, 1, f"cannot write config.json: {exc}")
     log("[+] Created config.json from config.example.json with browser.headless=true.")
+
+
+def has_credential_ledger(content: str) -> bool:
+    """Return True only when a ledger line holds real credential fields.
+
+    The runner writes `email----password----username` per line. Non-empty text
+    alone is not success: blank fields (e.g. `--------`) or arbitrary text must
+    fail the gate so a broken demo can never announce a healthy deployment.
+    """
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split("----")]
+        if len(parts) >= 3 and parts[0] and parts[1] and parts[2]:
+            return True
+    return False
 
 
 def run_demo(interpreter: Path) -> None:
@@ -110,22 +164,34 @@ def run_demo(interpreter: Path) -> None:
             "browser": {"headless": True, "enable_stealth": True},
             "output_dir": str(workdir / "results"),
         }
-        (workdir / "config.json").write_text(
-            json.dumps(demo_config, indent=2), encoding="utf-8"
-        )
+        try:
+            (workdir / "config.json").write_text(
+                json.dumps(demo_config, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            raise StageFailure(STAGE_DEMO, 1, f"cannot write demo config: {exc}")
         log("==> [demo] main.py --run demo (isolated temporary working directory)")
-        result = subprocess.run(
-            [str(interpreter), str(REPO_ROOT / "main.py"), "--run", "demo"],
-            cwd=str(workdir),
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [str(interpreter), str(REPO_ROOT / "main.py"), "--run", "demo"],
+                cwd=str(workdir),
+                check=False,
+            )
+        except OSError as exc:
+            raise StageFailure(STAGE_DEMO, 1, f"cannot start demo process: {exc}")
         if result.returncode != 0:
             raise StageFailure(STAGE_DEMO, result.returncode)
         ledger = workdir / "results" / "accounts.txt"
-        content = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
-        if not content.strip():
+        try:
+            content = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
+        except OSError as exc:
+            raise StageFailure(STAGE_DEMO, 1, f"cannot read demo ledger: {exc}")
+        if not has_credential_ledger(content):
             raise StageFailure(
-                STAGE_DEMO, 1, "demo account ledger is empty (accounts.txt has no credentials)"
+                STAGE_DEMO,
+                1,
+                "demo account ledger has no credential rows "
+                "(expected non-empty email----password----username)",
             )
         log("[+] Isolated demo ledger contains credential data (temporary, will be cleaned).")
     log("[+] Temporary demo directory cleaned.")
@@ -143,7 +209,7 @@ def main(argv=None) -> int:
     raw_argv = sys.argv[1:] if argv is None else list(argv)
     args = parser.parse_args(raw_argv)
 
-    if not in_venv():
+    if not in_project_venv():
         reexec_in_venv(ensure_venv(), raw_argv)
 
     interpreter = Path(sys.executable)

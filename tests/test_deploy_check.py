@@ -145,6 +145,64 @@ def test_empty_demo_ledger_is_failure(tmp_path, monkeypatch, capsys):
     assert "[failed] demo" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("bogus", ["garbage\n", "--------\n", "a@b.test----\n"])
+def test_noncredential_demo_ledger_is_failure(tmp_path, monkeypatch, capsys, bogus):
+    """Non-empty text without full credential fields must not pass the gate."""
+    root, _ = prepare_project(tmp_path, monkeypatch)
+
+    def bogus_demo(command, **kwargs):
+        if "--run" in command:
+            results = Path(kwargs["cwd"]) / "results"
+            results.mkdir(parents=True, exist_ok=True)
+            (results / "accounts.txt").write_text(bogus, encoding="utf-8")
+        return subprocess.CompletedProcess(args=command, returncode=0)
+
+    monkeypatch.setattr(deploy_check.subprocess, "run", Mock(side_effect=bogus_demo))
+
+    assert deploy_check.main(["--skip-install"]) == 1
+    assert "[failed] demo" in capsys.readouterr().out
+
+
+def test_stage_failure_named_when_process_cannot_start(tmp_path, monkeypatch, capsys):
+    root, _ = prepare_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        deploy_check.subprocess, "run", Mock(side_effect=OSError("interpreter missing"))
+    )
+
+    assert deploy_check.main(["--skip-install"]) == 1
+    assert "[failed] doctor" in capsys.readouterr().out
+
+
+def test_malformed_config_example_is_config_stage_failure(tmp_path, monkeypatch, capsys):
+    root, _ = prepare_project(tmp_path, monkeypatch)
+    (root / "config.example.json").write_text('{"browser": null}', encoding="utf-8")
+
+    assert deploy_check.main(["--skip-install"]) == 1
+    assert "[failed] config" in capsys.readouterr().out
+
+
+def test_foreign_venv_still_reexecs_into_project_venv(tmp_path, monkeypatch):
+    """An unrelated activated venv must not be reused for installation."""
+    root, executable = prepare_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(deploy_check.sys, "prefix", "C:/other-venv")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0)
+
+    monkeypatch.setattr(deploy_check.subprocess, "run", fake_run)
+    # Pretend the project .venv interpreter already exists.
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_text("", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        deploy_check.main(["--skip-install"])
+    assert exc_info.value.code == 0
+    assert calls[0][0] == str(executable)
+    assert calls[0][1].endswith("deploy_check.py")
+
+
 def test_unknown_option_exits_2_with_usage():
     script = Path(__file__).resolve().parent.parent / "scripts" / "deploy_check.py"
     result = subprocess.run(
