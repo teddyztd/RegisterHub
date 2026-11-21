@@ -8,6 +8,10 @@ RegisterHub is a local account-lifecycle automation framework. This glossary fix
 Preparing one local machine so the RegisterHub command-line application can run its offline demonstration and test suite.
 _Avoid_: Server release, hosted service
 
+**Deployment Checker**:
+The `scripts/deploy_check.py` entry point that prepares or reuses `.venv`, optionally installs dependencies and Playwright Chromium, preserves or derives configuration, and gates deployment on diagnostics, tests, and the isolated Demo. `--skip-install` omits only installation, not the verification gates.
+_Avoid_: Demo-only success check, server deployment pipeline
+
 **Verification Run**:
 A single, isolated execution that checks the environment, tests, and offline demonstration without changing normal account-ledger data.
 _Avoid_: Production registration, live signup
