@@ -113,10 +113,13 @@ class Im215Mailbox:
     name = "215.im"
 
     def __init__(self, api_key: str, session: Optional[requests.Session] = None,
-                 base_url: str = DEFAULT_215_BASE_URL, timeout: int = 20):
+                 base_url: str = DEFAULT_215_BASE_URL, timeout: int = 20,
+                 trust_env: bool = True):
         if not api_key:
             raise MailboxError("215.im API key is missing (configure apirf.mail.im215_api_key or APIRF_215_API_KEY)")
         self._session = session or requests.Session()
+        if session is None:
+            self._session.trust_env = trust_env
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._api_key = api_key
@@ -218,8 +221,8 @@ class ApirfMailRouter:
                  sleeper: Callable[[float], None] = time.sleep,
                  provider_order: Optional[List[str]] = None,
                  proxies: Optional[Dict[str, str]] = None,
-                 timeout: int = 20):
-        self._factories = factories or self._default_factories(proxies, timeout)
+                 timeout: int = 20, trust_env: bool = True):
+        self._factories = factories or self._default_factories(proxies, timeout, trust_env)
         names = provider_order or list(PROVIDER_ORDER)
         unknown = [name for name in names if name not in PROVIDER_ORDER]
         if unknown:
@@ -232,7 +235,8 @@ class ApirfMailRouter:
         self.active_address: Optional[str] = None
 
     @staticmethod
-    def _default_factories(proxies: Optional[Dict[str, str]], timeout: int) -> Dict[str, Callable[[], Any]]:
+    def _default_factories(proxies: Optional[Dict[str, str]], timeout: int,
+                           trust_env: bool = True) -> Dict[str, Callable[[], Any]]:
         """Built-in provider factories. Failures surface as exceptions -- no
         local placeholder address is ever fabricated."""
 
@@ -241,9 +245,9 @@ class ApirfMailRouter:
 
         return {
             "215.im": _make_215,
-            "mail.tm": lambda: _PublicBackend("mail.tm", proxies, timeout),
-            "tempmail.io": lambda: _PublicBackend("tempmail.io", proxies, timeout),
-            "guerrillamail": lambda: _PublicBackend("guerrillamail", proxies, timeout),
+            "mail.tm": lambda: _PublicBackend("mail.tm", proxies, timeout, trust_env),
+            "tempmail.io": lambda: _PublicBackend("tempmail.io", proxies, timeout, trust_env),
+            "guerrillamail": lambda: _PublicBackend("guerrillamail", proxies, timeout, trust_env),
         }
 
     # -- creation -----------------------------------------------------------
@@ -342,10 +346,15 @@ class _PublicBackend:
     exactly the behaviour the ADR requires.
     """
 
-    def __init__(self, provider: str, proxies: Optional[Dict[str, str]], timeout: int):
+    def __init__(self, provider: str, proxies: Optional[Dict[str, str]], timeout: int,
+                 trust_env: bool = True):
         self.name = provider
         self._client = DisposableMailClient(timeout=timeout, providers=[provider])
-        self._client.proxies = proxies
+        if proxies is not None:
+            self._client.proxies = proxies
+        elif not trust_env:
+            # Explicit per-scheme None makes requests bypass system/env proxies.
+            self._client.proxies = {"http": None, "https": None}
 
     def create_mailbox(self) -> str:
         return self._client.create_mailbox()

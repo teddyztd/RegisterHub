@@ -308,3 +308,35 @@ def test_captcha_access_denial_and_rate_limit_stop_without_retries(monkeypatch, 
 
 def router_not_created(adapter):
     return adapter.mail_router.create_calls == 0
+
+
+def test_adapter_default_session_bypasses_system_proxy():
+    adapter = ApirfAdapter(config={"apirf": {}})
+
+    assert adapter.session.trust_env is False
+
+
+def test_adapter_trust_env_true_keeps_system_proxy():
+    adapter = ApirfAdapter(config={"apirf": {"http": {"trust_env": True}}})
+
+    assert adapter.session.trust_env is True
+
+
+def test_adapter_does_not_reconfigure_an_injected_session():
+    session = FakeSession([])
+    adapter = make_adapter(session, FakeMailRouter())
+
+    assert adapter.session is session
+    assert not hasattr(session, "trust_env")
+
+
+def test_215_mailbox_session_honors_trust_env_flag():
+    assert Im215Mailbox(api_key="k")._session.trust_env is True
+    assert Im215Mailbox(api_key="k", trust_env=False)._session.trust_env is False
+
+
+def test_public_mail_backend_can_force_direct_connection():
+    router = ApirfMailRouter(trust_env=False)
+    backend = router._factories["mail.tm"]()
+
+    assert backend._client.proxies == {"http": None, "https": None}

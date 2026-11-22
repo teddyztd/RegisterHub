@@ -59,15 +59,26 @@ class ApirfAdapter(BaseSiteAdapter):
         super().__init__(page, context, config)
         apirf_cfg = (config or {}).get("apirf", {})
         mail_cfg = apirf_cfg.get("mail", {})
+        http_cfg = apirf_cfg.get("http", {})
         self.base_url = apirf_cfg.get("base_url", APIRF_BASE_URL).rstrip("/")
         self.timeout = mail_cfg.get("http_timeout_secs", 20)
         self.confirmation_timeout = mail_cfg.get("confirmation_timeout_secs", 300)
-        self.session = session or requests.Session()
-        self.mail_router = mail_router or self._build_default_router(mail_cfg)
+        # Direct connection by default: apirf.http.trust_env=False makes the
+        # session ignore Windows system / environment proxies (a broken local
+        # proxy aborts the TLS handshake). An injected session is left as-is.
+        self.trust_env = http_cfg.get("trust_env", False)
+        self.session = session or self._new_session(self.trust_env)
+        self.mail_router = mail_router or self._build_default_router(mail_cfg, self.trust_env)
         self.pending_activation: Optional[Dict[str, Any]] = None
 
     @staticmethod
-    def _build_default_router(mail_cfg: Dict[str, Any]) -> ApirfMailRouter:
+    def _new_session(trust_env: bool) -> requests.Session:
+        session = requests.Session()
+        session.trust_env = trust_env
+        return session
+
+    @staticmethod
+    def _build_default_router(mail_cfg: Dict[str, Any], trust_env: bool = False) -> ApirfMailRouter:
         """Build the production mailbox route from local config / environment.
 
         The 215.im API key is read from config or APIRF_215_API_KEY and passed
@@ -78,10 +89,10 @@ class ApirfAdapter(BaseSiteAdapter):
         api_key = mail_cfg.get("im215_api_key") or os.environ.get("APIRF_215_API_KEY", "")
         timeout = mail_cfg.get("http_timeout_secs", 20)
         factories = {
-            "215.im": lambda: Im215Mailbox(api_key=api_key, timeout=timeout),
+            "215.im": lambda: Im215Mailbox(api_key=api_key, timeout=timeout, trust_env=trust_env),
             # remaining providers use ApirfMailRouter's built-in public backends
         }
-        router = ApirfMailRouter(timeout=timeout)
+        router = ApirfMailRouter(timeout=timeout, trust_env=trust_env)
         router._factories = {**router._factories, **factories}
         order = mail_cfg.get("provider_order")
         if order:

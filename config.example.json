@@ -13,6 +13,9 @@
   "output_dir": "./results",
   "apirf": {
     "base_url": "https://apirf.ru",
+    "http": {
+      "trust_env": false
+    },
     "mail": {
       "im215_api_key": "",
       "http_timeout_secs": 20,
