@@ -81,6 +81,7 @@ RegisterHub includes reference implementations covering diverse architectural pa
 | `coarena` | Coarena AI Platform | **Post-Google OAuth Protocol Registration & Key Minting** | Demonstrates OAuth session capture, pure REST terms acceptance & instant API key minting |
 | `milionseek` | 100milionseek Platform | **100M Tokens/day Free Compute** + Turnstile Clearance | Instant on-page key generation (no mail verification needed) + referral cascade pool |
 | `automation_exercise` | Standard Benchmark Portal | Multi-stage registration wizard | Complex dropdown cascading & checkbox grids |
+| `apirf` | [APIrf](https://apirf.ru) | Pure-HTTP session + strict activation-link extraction | Single-account registration, email activation, and identity verification |
 
 ---
 
@@ -179,6 +180,41 @@ My manual walkthrough (screenshots attached):
 Please assemble sites/example_site.py according to this exact walkthrough and run a local verification test!
 ```
 The AI will precisely map and automate your verified human interaction chain, eliminating guesswork and ensuring production-grade reliability on the first attempt!
+
+### 5. APIrf Pure-HTTP Single-Account Registration
+
+The `apirf` adapter targets only **https://apirf.ru**. One HTTP session handles guest creation, account binding, email confirmation, and identity verification without launching a browser.
+
+Set `apirf.mail.im215_api_key` in the local `config.json`, or use the `APIRF_215_API_KEY` environment variable instead. Never commit a real key. PowerShell example:
+
+```powershell
+$env:APIRF_215_API_KEY = "<your-215.im-api-key>"
+python main.py --run apirf --count 1
+```
+
+`config.example.json` contains an empty key and these defaults:
+
+| Setting | Default | Purpose |
+| :--- | :--- | :--- |
+| `apirf.base_url` | `https://apirf.ru` | APIrf target |
+| `apirf.mail.im215_api_key` | Empty string | 215.im key; `APIRF_215_API_KEY` is the environment alternative |
+| `apirf.mail.http_timeout_secs` | `20` | Timeout in seconds for each APIrf or mailbox HTTP request |
+| `apirf.mail.confirmation_timeout_secs` | `300` | Overall timeout in seconds while waiting for the confirmation email |
+| `apirf.mail.provider_order` | `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail` | Mailbox-provider fallback order |
+
+Providers fail over in this order only before an address is submitted to APIrf. After submission, the same mailbox remains pinned for polling; the run does not switch addresses and retry.
+
+Artifacts are written under `output_dir` (default `./results`):
+
+| Artifact | When and what is written |
+| :--- | :--- |
+| `results/accounts.txt` | Appends `email----password----login` only after strict verification |
+| `results/cookies/<login>.json` | Exports the non-empty session cookies before the success ledger, with `name`, `value`, `domain`, `path`, `expires`, `httpOnly`, `secure`, and `sameSite` |
+| `results/pending_activation/<login>.json` | Stores recovery data with stage `confirmation` or `identity` when activation is incomplete; no success ledger or cookie artifact is written |
+
+**Strict success gate:** the confirmation link must use the official confirmation path on `https://apirf.ru`; the following `GET /api/auth/me` must return the literal values `email_verified: true` and `is_guest: false`, and the session cookie jar must be non-empty. A captcha, access-denied response, HTTP 403/429, or rate-limit signal stops the run immediately without a retry storm.
+
+**Only the single-account acceptance run above is authorized by default. Bulk account-lifecycle testing and pressure testing are not authorized by default and require separate explicit approval.** Accounts, cookies, and pending-activation records under `results/` are sensitive local artifacts and must not be committed.
 
 ---
 

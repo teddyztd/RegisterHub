@@ -11,6 +11,20 @@
     "cdp_endpoint": null
   },
   "output_dir": "./results",
+  "apirf": {
+    "base_url": "https://apirf.ru",
+    "mail": {
+      "im215_api_key": "",
+      "http_timeout_secs": 20,
+      "confirmation_timeout_secs": 300,
+      "provider_order": [
+        "215.im",
+        "mail.tm",
+        "tempmail.io",
+        "guerrillamail"
+      ]
+    }
+  },
   "defaults": {
     "country": "US",
     "password_length": 14,
