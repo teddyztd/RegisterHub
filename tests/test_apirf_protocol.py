@@ -123,7 +123,8 @@ def test_full_protocol_uses_one_session_in_the_recorded_order(monkeypatch):
         FakeResponse({"id": "guest"}),
         FakeResponse({"email": "mailbox@mail.example"}),
         FakeResponse({"confirmed": True}),
-        FakeResponse({"email_verified": True, "is_guest": False}),
+        FakeResponse({"ok": True, "user": {"email_verified": True, "is_guest": False}}),
+        FakeResponse({"ok": True, "user": {"email_verified": True, "is_guest": False}}),
     ])
     router = FakeMailRouter()
     monkeypatch.setattr("sites.apirf.generate_identity", identity_fixture)
@@ -135,6 +136,7 @@ def test_full_protocol_uses_one_session_in_the_recorded_order(monkeypatch):
         ("POST", "https://apirf.ru/api/auth/guest"),
         ("POST", "https://apirf.ru/api/auth/guest/upgrade"),
         ("GET", CONFIRM_URL),
+        ("POST", "https://apirf.ru/api/auth/login"),
         ("GET", "https://apirf.ru/api/auth/me"),
     ]
     assert "json" not in session.calls[0][2]
@@ -143,6 +145,10 @@ def test_full_protocol_uses_one_session_in_the_recorded_order(monkeypatch):
         "password": "not-a-real-password!A1",
         "email": "mailbox@mail.example",
     }
+    assert session.calls[3][2]["json"] == {
+        "login": "apirf_login",
+        "password": "not-a-real-password!A1",
+    }
     assert router.submitted is True
     assert router.create_calls == 1
     assert adapter.account_data["email"] == "mailbox@mail.example"
@@ -150,20 +156,23 @@ def test_full_protocol_uses_one_session_in_the_recorded_order(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "identity",
+    "payload",
     [
-        {"email_verified": False, "is_guest": False},
-        {"email_verified": True, "is_guest": True},
-        {"email_verified": 1, "is_guest": 0},
+        {"ok": True, "user": {"email_verified": False, "is_guest": False}},
+        {"ok": True, "user": {"email_verified": True, "is_guest": True}},
+        {"ok": True, "user": {"email_verified": 1, "is_guest": 0}},
+        {"ok": True, "user": {}},
+        {"ok": True, "email_verified": True, "is_guest": False},
         {},
     ],
 )
-def test_only_exact_verified_non_guest_identity_succeeds(monkeypatch, identity):
+def test_only_exact_verified_non_guest_identity_succeeds(monkeypatch, payload):
     session = FakeSession([
         FakeResponse(),
         FakeResponse(),
         FakeResponse(),
-        FakeResponse(identity),
+        FakeResponse({"ok": True, "user": {"email_verified": True, "is_guest": False}}),
+        FakeResponse(payload),
     ])
     monkeypatch.setattr("sites.apirf.generate_identity", identity_fixture)
     adapter = make_adapter(session, FakeMailRouter())
@@ -216,6 +225,48 @@ def test_confirmation_link_filter_ignores_other_links_and_decodes_html():
     assert extract_apirf_confirmation_link(body) == (
         "https://apirf.ru/api/auth/email/confirm/real-token?source=email&lang=en"
     )
+
+
+def test_confirmation_link_filter_accepts_the_real_web_form_link():
+    """The live email links to /podtverdit?token=..., not the API path.
+
+    The extractor normalizes it to the canonical API confirmation URL so the
+    adapter can perform the actual confirmation action with a GET.
+    """
+    body = """
+        <a href="https://apirf.ru/podtverdit?token=9wTjAjq2dDMskuv3Xm3BbzuPVrYrLEZf"
+           style="background:#c9ec4d">Подтвердить email</a>
+    """
+
+    assert extract_apirf_confirmation_link(body) == (
+        "https://apirf.ru/api/auth/email/confirm/9wTjAjq2dDMskuv3Xm3BbzuPVrYrLEZf"
+    )
+
+
+def test_confirmation_link_filter_accepts_the_real_web_form_plain_text_link():
+    body = "Подтвердите email: https://apirf.ru/podtverdit?token=9wTjAjq2dDMskuv3Xm3BbzuPVrYrLEZf\n"
+
+    assert extract_apirf_confirmation_link(body) == (
+        "https://apirf.ru/api/auth/email/confirm/9wTjAjq2dDMskuv3Xm3BbzuPVrYrLEZf"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://apirf.ru/podtverdit",
+        "https://apirf.ru/podtverdit?token=",
+        "https://apirf.ru/podtverdit?other=1",
+        "https://apirf.ru/podtverdit?token=a/b",
+        "https://evil.example/podtverdit?token=abc",
+        "http://apirf.ru/podtverdit?token=abc",
+        "https://www.apirf.ru/podtverdit?token=abc",
+        "https://apirf.ru:444/podtverdit?token=abc",
+        "https://user@apirf.ru/podtverdit?token=abc",
+    ],
+)
+def test_confirmation_link_filter_rejects_unsafe_web_form_links(url):
+    assert extract_apirf_confirmation_link(f'<a href="{url}">confirm</a>') is None
 
 
 def test_mailbox_creation_falls_back_in_the_required_order():
@@ -308,3 +359,35 @@ def test_captcha_access_denial_and_rate_limit_stop_without_retries(monkeypatch, 
 
 def router_not_created(adapter):
     return adapter.mail_router.create_calls == 0
+
+
+def test_adapter_default_session_bypasses_system_proxy():
+    adapter = ApirfAdapter(config={"apirf": {}})
+
+    assert adapter.session.trust_env is False
+
+
+def test_adapter_trust_env_true_keeps_system_proxy():
+    adapter = ApirfAdapter(config={"apirf": {"http": {"trust_env": True}}})
+
+    assert adapter.session.trust_env is True
+
+
+def test_adapter_does_not_reconfigure_an_injected_session():
+    session = FakeSession([])
+    adapter = make_adapter(session, FakeMailRouter())
+
+    assert adapter.session is session
+    assert not hasattr(session, "trust_env")
+
+
+def test_215_mailbox_session_honors_trust_env_flag():
+    assert Im215Mailbox(api_key="k")._session.trust_env is True
+    assert Im215Mailbox(api_key="k", trust_env=False)._session.trust_env is False
+
+
+def test_public_mail_backend_can_force_direct_connection():
+    router = ApirfMailRouter(trust_env=False)
+    backend = router._factories["mail.tm"]()
+
+    assert backend._client.proxies == {"http": None, "https": None}
