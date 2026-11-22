@@ -64,6 +64,26 @@ class BlockedAdapter(SuccessAdapter):
         raise ApirfBlockedError("captcha")
 
 
+class CrashingAdapter(SuccessAdapter):
+    """Adapter whose post-binding phase raises a generic exception.
+
+    pending_activation is set in the constructor, mirroring an adapter that
+    reached confirmation/identity before the crash, so the runner's exception
+    path must preserve the recovery record.
+    """
+
+    def __init__(self, page, context, config):
+        super().__init__(page, context, config)
+        self.pending_activation = {
+            "stage": "identity",
+            "account": dict(self.account_data),
+            "mailbox": {"provider": "215.im", "address": "real@mail.example"},
+        }
+
+    def run(self):
+        raise RuntimeError("identity verification exploded")
+
+
 def test_protocol_success_never_starts_browser_and_exports_ledger_and_cookies(tmp_path):
     SuccessAdapter.instantiations = 0
     runner = make_runner(tmp_path)
@@ -120,13 +140,39 @@ def test_pending_activation_writes_recovery_record_without_success_or_cookies(tm
     assert record["recorded_at"]
 
 
-def test_blocked_protocol_stops_batch_immediately_without_retries(tmp_path):
+def test_protocol_exception_preserves_pending_recovery_record(tmp_path):
+    runner = make_runner(tmp_path)
+
+    with patch("core.runner.sync_playwright", side_effect=AssertionError("browser must not start")):
+        assert runner.execute_adapter(CrashingAdapter, count=1) == 0
+
+    assert not (tmp_path / "accounts.txt").exists()
+    assert not (tmp_path / "cookies").exists()
+    record_file = tmp_path / "pending_activation" / "apirf_login.json"
+    record = json.loads(record_file.read_text(encoding="utf-8"))
+    assert record["stage"] == "identity"
+    assert record["mailbox"] == {"provider": "215.im", "address": "real@mail.example"}
+    assert "identity verification exploded" in (tmp_path / "failed.txt").read_text(encoding="utf-8")
+
+
+def test_protocol_rejects_bulk_count_before_creating_accounts(tmp_path):
+    SuccessAdapter.instantiations = 0
+    runner = make_runner(tmp_path)
+
+    with pytest.raises(ValueError, match="one account per run"):
+        runner.execute_adapter(SuccessAdapter, count=2)
+
+    assert SuccessAdapter.instantiations == 0
+    assert not (tmp_path / "accounts.txt").exists()
+
+
+def test_blocked_protocol_stops_without_retrying(tmp_path):
     BlockedAdapter.runs = 0
     BlockedAdapter.instantiations = 0
     runner = make_runner(tmp_path)
 
     with patch("core.runner.sync_playwright", side_effect=AssertionError("browser must not start")):
-        assert runner.execute_adapter(BlockedAdapter, count=3) == 0
+        assert runner.execute_adapter(BlockedAdapter, count=1) == 0
 
     assert BlockedAdapter.runs == 1
     assert BlockedAdapter.instantiations == 1

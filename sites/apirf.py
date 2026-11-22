@@ -62,7 +62,9 @@ class ApirfAdapter(BaseSiteAdapter):
         apirf_cfg = (config or {}).get("apirf", {})
         mail_cfg = apirf_cfg.get("mail", {})
         http_cfg = apirf_cfg.get("http", {})
-        self.base_url = apirf_cfg.get("base_url", APIRF_BASE_URL).rstrip("/")
+        # APIrf has a single fixed target origin; config cannot redirect the
+        # registration protocol to another host.
+        self.base_url = APIRF_BASE_URL
         self.timeout = mail_cfg.get("http_timeout_secs", 20)
         self.confirmation_timeout = mail_cfg.get("confirmation_timeout_secs", 300)
         # Direct connection by default: apirf.http.trust_env=False makes the
@@ -90,19 +92,12 @@ class ApirfAdapter(BaseSiteAdapter):
         """
         api_key = mail_cfg.get("im215_api_key") or os.environ.get("APIRF_215_API_KEY", "")
         timeout = mail_cfg.get("http_timeout_secs", 20)
+        # The spec fixes the mailbox order. Only provider credentials and
+        # transport knobs are configurable; provider_order is not a knob.
         factories = {
             "215.im": lambda: Im215Mailbox(api_key=api_key, timeout=timeout, trust_env=trust_env),
-            # remaining providers use ApirfMailRouter's built-in public backends
         }
-        router = ApirfMailRouter(timeout=timeout, trust_env=trust_env)
-        router._factories = {**router._factories, **factories}
-        order = mail_cfg.get("provider_order")
-        if order:
-            unknown = [name for name in order if name not in router._factories]
-            if unknown:
-                raise ValueError(f"Unknown apirf.mail.provider_order entries: {unknown}")
-            router._order = list(order)
-        return router
+        return ApirfMailRouter(factories=factories, timeout=timeout, trust_env=trust_env)
 
     # -- BaseSiteAdapter interface -----------------------------------------
 
@@ -167,16 +162,16 @@ class ApirfAdapter(BaseSiteAdapter):
             "email": address,
         })
         self.mail_router.mark_submitted()
+        self._set_pending("confirmation")
 
         # 4. Poll the pinned mailbox and follow only a strictly validated link.
         link = self.mail_router.poll_for_confirmation(timeout_secs=self.confirmation_timeout)
         if not link:
-            self._set_pending("confirmation")
             return False
         if not extract_apirf_confirmation_link(f'href="{link}"'):
-            self._set_pending("confirmation")
             return False
         self._get(link)
+        self._set_pending("identity")
 
         # 5. Establish an authenticated session after email confirmation. The
         # upgraded guest cookie is not sufficient for the final identity gate.
@@ -193,6 +188,7 @@ class ApirfAdapter(BaseSiteAdapter):
         if not isinstance(me, dict):
             me = {}
         if me.get("email_verified") is True and me.get("is_guest") is False:
+            self.pending_activation = None
             return True
         self._set_pending("identity")
         return False

@@ -196,11 +196,11 @@ python main.py --run apirf --count 1
 
 | Setting | Default | Purpose |
 | :--- | :--- | :--- |
-| `apirf.base_url` | `https://apirf.ru` | APIrf target |
 | `apirf.mail.im215_api_key` | Empty string | 215.im key; `APIRF_215_API_KEY` is the environment alternative |
 | `apirf.mail.http_timeout_secs` | `20` | Timeout in seconds for each APIrf or mailbox HTTP request |
 | `apirf.mail.confirmation_timeout_secs` | `300` | Overall timeout in seconds while waiting for the confirmation email |
-| `apirf.mail.provider_order` | `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail` | Mailbox-provider fallback order |
+
+The target origin is fixed at `https://apirf.ru`; the mailbox order is fixed at `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail`. Neither can be replaced by configuration.
 
 Providers fail over in this order only before an address is submitted to APIrf. After submission, the same mailbox remains pinned for polling; the run does not switch addresses and retry.
 

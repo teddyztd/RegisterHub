@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from core.mail_client import MailboxError, NoProviderAvailable
-from core.apirf_mail import ApirfMailRouter, Im215Mailbox, extract_apirf_confirmation_link
+from core.apirf_mail import PROVIDER_ORDER, ApirfMailRouter, Im215Mailbox, extract_apirf_confirmation_link
 from sites import discover_adapters
 from sites.apirf import ApirfAdapter, ApirfBlockedError
 
@@ -391,3 +391,37 @@ def test_public_mail_backend_can_force_direct_connection():
     backend = router._factories["mail.tm"]()
 
     assert backend._client.proxies == {"http": None, "https": None}
+
+
+def test_adapter_origin_is_fixed_to_apirf_ru():
+    adapter = ApirfAdapter(
+        config={"apirf": {"base_url": "https://evil.example"}},
+        session=FakeSession([]),
+        mail_router=FakeMailRouter(),
+    )
+
+    assert adapter.target_url() == "https://apirf.ru/"
+    assert adapter.base_url == "https://apirf.ru"
+
+
+def test_adapter_mailbox_order_cannot_be_overridden_by_config():
+    router = ApirfAdapter._build_default_router(
+        {"im215_api_key": "test-key", "provider_order": ["mail.tm"]},
+        trust_env=False,
+    )
+
+    assert router._order == list(PROVIDER_ORDER)
+
+
+def test_poll_retries_a_message_whose_body_read_was_transiently_empty():
+    mailbox = FakeMailbox(messages=[{"id": "confirm"}])
+    bodies = iter(["", f"Click {CONFIRM_URL}"])
+    mailbox.read_message = lambda _: next(bodies)
+    router = ApirfMailRouter(
+        factories={"215.im": Mock(return_value=mailbox)},
+        sleeper=lambda _: None,
+    )
+    router.create_mailbox()
+    router.mark_submitted()
+
+    assert router.poll_for_confirmation(timeout_secs=1, first_interval=0) == CONFIRM_URL

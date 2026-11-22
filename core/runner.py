@@ -181,6 +181,10 @@ class StandardRunner:
         return path
 
     def _execute_protocol_adapter(self, adapter_cls, count: int) -> int:
+        if count != 1:
+            raise ValueError(
+                "Protocol adapters create one account per run; bulk creation requires separate approval"
+            )
         success_count = 0
         self.log("info", f"Starting protocol session (target count: {count}, no browser)...")
 
@@ -204,6 +208,8 @@ class StandardRunner:
             except Exception as e:
                 elapsed = round(time.time() - task_start, 2)
                 self.log("error", f"Protocol task [{idx}/{count}] failed after {elapsed}s: {e}")
+                if adapter.pending_activation:
+                    self._save_pending_activation(adapter)
                 self.save_failed(str(e), adapter.account_data)
                 if getattr(e, "stop_run", False):
                     self.log("warn", "Blocking response detected; stopping the batch immediately (no retries).")

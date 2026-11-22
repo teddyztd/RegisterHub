@@ -237,7 +237,10 @@ class ApirfMailRouter:
                  provider_order: Optional[List[str]] = None,
                  proxies: Optional[Dict[str, str]] = None,
                  timeout: int = 20, trust_env: bool = True):
-        self._factories = factories or self._default_factories(proxies, timeout, trust_env)
+        self._factories = {
+            **self.default_factories(proxies, timeout, trust_env),
+            **(factories or {}),
+        }
         names = provider_order or list(PROVIDER_ORDER)
         unknown = [name for name in names if name not in PROVIDER_ORDER]
         if unknown:
@@ -250,7 +253,7 @@ class ApirfMailRouter:
         self.active_address: Optional[str] = None
 
     @staticmethod
-    def _default_factories(proxies: Optional[Dict[str, str]], timeout: int,
+    def default_factories(proxies: Optional[Dict[str, str]], timeout: int,
                            trust_env: bool = True) -> Dict[str, Callable[[], Any]]:
         """Built-in provider factories. Failures surface as exceptions -- no
         local placeholder address is ever fabricated."""
@@ -321,7 +324,7 @@ class ApirfMailRouter:
 
         deadline = time.time() + timeout_secs
         interval = first_interval
-        seen = set()
+        processed_message_ids = set()
 
         while time.time() < deadline:
             try:
@@ -330,13 +333,18 @@ class ApirfMailRouter:
                 messages = []
             for message in messages:
                 message_id = message.get("id")
-                if message_id in seen:
+                if message_id in processed_message_ids:
                     continue
-                seen.add(message_id)
                 body = message.get("body")
                 if not body:
-                    body = self._mailbox.read_message(message_id)
-                link = extract_apirf_confirmation_link(body or "")
+                    try:
+                        body = self._mailbox.read_message(message_id)
+                    except Exception:  # retry this message on the next poll
+                        body = ""
+                if not body:
+                    continue
+                processed_message_ids.add(message_id)
+                link = extract_apirf_confirmation_link(body)
                 if link:
                     return link
             self._sleeper(interval)

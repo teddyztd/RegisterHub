@@ -196,11 +196,11 @@ python main.py --run apirf --count 1
 
 | 配置项 | 默认值 | 含义 |
 | :--- | :--- | :--- |
-| `apirf.base_url` | `https://apirf.ru` | APIrf 目标地址 |
 | `apirf.mail.im215_api_key` | 空字符串 | 215.im 密钥；也可由 `APIRF_215_API_KEY` 提供 |
 | `apirf.mail.http_timeout_secs` | `20` | 单次 APIrf 或邮箱 HTTP 请求超时（秒） |
 | `apirf.mail.confirmation_timeout_secs` | `300` | 等待确认邮件的总超时（秒） |
-| `apirf.mail.provider_order` | `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail` | 邮箱服务商回退顺序 |
+
+目标域名固定为 `https://apirf.ru`，不能通过配置替换；邮箱服务商顺序固定为 `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail`，也不可通过配置改写。
 
 邮箱服务商只按上述顺序在地址尚未提交给 APIrf 前回退；地址一经提交，后续收信固定使用同一邮箱，不会换号重试。
 
