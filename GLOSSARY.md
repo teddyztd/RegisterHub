@@ -27,3 +27,23 @@ _Avoid_: Database, remote credential store
 **Browser Preference**:
 The policy of using installed Google Chrome first and falling back to Playwright Chromium when Chrome is unavailable.
 _Avoid_: Chrome requirement, Chromium-only mode
+
+**APIrf Guest**:
+A temporary APIrf session created by the guest endpoint. It is not a successfully registered account until login, password, and email are bound and the email is confirmed.
+_Avoid_: Registered account, verified account
+
+**APIrf Registration**:
+The complete guest creation, credential binding, email confirmation, and authenticated identity-verification flow for one account. Only an identity response with `email_verified=true` and `is_guest=false` is successful.
+_Avoid_: Email sent, guest session created
+
+**Pending Activation**:
+An account whose guest and binding steps may have succeeded but whose email confirmation or identity verification is incomplete. Recovery data is retained separately from the successful Account Ledger.
+_Avoid_: Successful account, disposable failed attempt
+
+**Mailbox Route**:
+The ordered temporary-mail policy for APIrf: 215.im first, then mail.tm, tempmail.io, and guerrillamail. Failover must not silently replace an address already submitted to APIrf.
+_Avoid_: Arbitrary mailbox retry, fabricated local address
+
+**Cookie Sidecar**:
+The per-account standard Cookie JSON array written under `results/cookies/` from the same HTTP session used for registration and identity verification.
+_Avoid_: Browser storage state, account-ledger delimiter payload
