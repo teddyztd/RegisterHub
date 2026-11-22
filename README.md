@@ -81,6 +81,7 @@ RegisterHub 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 | `coarena` | Coarena AI 平台 | **谷歌登录后纯协议注册与提 Key** | 示范 Google OAuth 会话捕获后 100% 协议确认条款并秒级直出 Key |
 | `milionseek` | 100milionseek 平台 | **每日 1 亿 Token 免费算力** + Turnstile 穿透 | 填邮箱秒级直出 Key（免收激活信），内置母号裂变接力管理 |
 | `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态硬断言 |
+| `apirf` | [APIrf](https://apirf.ru) | 纯 HTTP 会话 + 严格激活链接提取 | 单账号注册、邮箱激活与身份态二次校验 |
 
 ---
 
@@ -179,6 +180,41 @@ AI 会自动读取根目录规则与模板，自主嗅探表单字段、生成�
 请根据我的真实操作路径编写 sites/example_site.py，并进行本地试跑验收！
 ```
 AI 将直接对照你跑通的真实人类行为路径进行精确代码装配与接口逆向，避免无头盲测走弯路，一击必中！
+
+### 5. APIrf 纯 HTTP 单账号注册
+
+`apirf` 适配器的唯一目标是 **https://apirf.ru**。它使用同一个 HTTP 会话完成访客创建、账号绑定、邮件确认、登录和身份校验，不启动浏览器。
+
+在本地 `config.json` 中配置 `apirf.mail.im215_api_key`，或改用环境变量 `APIRF_215_API_KEY`；不要把真实密钥写入仓库。PowerShell 示例：
+
+```powershell
+$env:APIRF_215_API_KEY = "<your-215.im-api-key>"
+python main.py --run apirf --count 1
+```
+
+`config.example.json` 提供了空密钥与以下默认设置：
+
+| 配置项 | 默认值 | 含义 |
+| :--- | :--- | :--- |
+| `apirf.mail.im215_api_key` | 空字符串 | 215.im 密钥；也可由 `APIRF_215_API_KEY` 提供 |
+| `apirf.mail.http_timeout_secs` | `20` | 单次 APIrf 或邮箱 HTTP 请求超时（秒） |
+| `apirf.mail.confirmation_timeout_secs` | `300` | 等待确认邮件的总超时（秒） |
+
+目标域名固定为 `https://apirf.ru`，不能通过配置替换；邮箱服务商顺序固定为 `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail`，也不可通过配置改写。
+
+邮箱服务商只按上述顺序在地址尚未提交给 APIrf 前回退；地址一经提交，后续收信固定使用同一邮箱，不会换号重试。
+
+产物写入 `output_dir`（默认 `./results`）：
+
+| 产物 | 写入条件与内容 |
+| :--- | :--- |
+| `results/accounts.txt` | 严格校验通过后追加 `email----password----login` |
+| `results/cookies/<login>.json` | 成功台账写入前导出的非空会话 Cookie，包含 `name`、`value`、`domain`、`path`、`expires`、`httpOnly`、`secure`、`sameSite` |
+| `results/pending_activation/<login>.json` | 激活未完成时保存恢复信息，并标明 `confirmation` 或 `identity` 阶段；不会同时写入成功台账或 Cookie |
+
+**严格成功门禁**：确认链接必须属于 `https://apirf.ru` 的官方确认路径；随后使用同一会话执行登录，`GET /api/auth/me` 的 `user` 对象必须返回严格的 `email_verified: true` 与 `is_guest: false`，且会话 Cookie 非空，才判定成功。登录响应本身不作为成功依据。遇到人机验证、访问拒绝、HTTP 403/429 或频控信号时立即停止，不做重试风暴。
+
+**默认仅授权上述单账号验收；批量账号生命周期测试与压力测试均未获默认授权，必须另行明确批准。** `results/` 中的账号、Cookie 与待激活记录属于本地敏感产物，不得提交到仓库。
 
 ---
 

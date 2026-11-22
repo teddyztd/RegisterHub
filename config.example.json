@@ -11,6 +11,16 @@
     "cdp_endpoint": null
   },
   "output_dir": "./results",
+  "apirf": {
+    "http": {
+      "trust_env": false
+    },
+    "mail": {
+      "im215_api_key": "",
+      "http_timeout_secs": 20,
+      "confirmation_timeout_secs": 300
+    }
+  },
   "defaults": {
     "country": "US",
     "password_length": 14,

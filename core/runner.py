@@ -4,6 +4,7 @@ Manages browser lifecycle, logging, failure snapshot capture, and account ledger
 """
 import os
 import sys
+import json
 import time
 from pathlib import Path
 from datetime import datetime
@@ -106,6 +107,118 @@ class StandardRunner:
         return p.chromium.launch(**launch_kwargs)
 
     def execute_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
+        """Dispatch to the pure-HTTP protocol path or the classic browser path.
+
+        Adapters declaring ``requires_browser = False`` (e.g. APIrf) run without
+        Playwright ever being started; every other adapter keeps the original
+        browser lifecycle untouched.
+        """
+        if getattr(adapter_cls, "requires_browser", True) is False:
+            return self._execute_protocol_adapter(adapter_cls, count)
+        return self._execute_browser_adapter(adapter_cls, count)
+
+    # -- pure-HTTP protocol path (feature: apirf-http-registration) ---------
+
+    @staticmethod
+    def _safe_filename(name: str) -> str:
+        """Map a login to a filesystem-safe sidecar filename."""
+        cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(name))
+        return cleaned or "account"
+
+    def _export_cookies(self, adapter) -> Path:
+        """Write the standard cookie sidecar for a verified account.
+
+        Format per cookie: name, value, domain, path, expires, httpOnly,
+        secure, sameSite -- matching the playback contract in the ADR.
+        """
+        cookies = []
+        session = getattr(adapter, "session", None)
+        jar = getattr(session, "cookies", None)
+        for c in list(jar or []):
+            rest = getattr(c, "_rest", {}) or {}
+            http_only = any(key.lower() == "httponly" for key in rest)
+            same_site = next((v for key, v in rest.items() if key.lower() == "samesite"), None)
+            cookies.append({
+                "name": c.name,
+                "value": c.value,
+                "domain": c.domain,
+                "path": c.path,
+                "expires": c.expires,
+                "httpOnly": http_only,
+                "secure": bool(c.secure),
+                "sameSite": same_site,
+            })
+        if not cookies:
+            raise ValueError("Verified protocol account has no session cookies; refusing success ledger")
+        username = self._safe_filename(adapter.account_data.get("username") or "account")
+        cookie_dir = self.output_dir / "cookies"
+        cookie_dir.mkdir(parents=True, exist_ok=True)
+        path = cookie_dir / f"{username}.json"
+        path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.log("info", f"Cookie sidecar exported: {path}")
+        return path
+
+    def _save_pending_activation(self, adapter) -> Path:
+        """Persist an incomplete activation for later resumption.
+
+        Stored separately from accounts.txt / failed.txt under
+        results/pending_activation/<login>.json with the failure stage,
+        account credentials and mailbox recovery data.
+        """
+        pending = getattr(adapter, "pending_activation", None) or {
+            "stage": "unknown",
+            "account": dict(adapter.account_data),
+            "mailbox": {},
+        }
+        record = dict(pending)
+        record["recorded_at"] = datetime.now().isoformat()
+        username = self._safe_filename(adapter.account_data.get("username") or "account")
+        pending_dir = self.output_dir / "pending_activation"
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        path = pending_dir / f"{username}.json"
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.log("warn", f"Pending activation recorded: {path} (stage={record.get('stage')})")
+        return path
+
+    def _execute_protocol_adapter(self, adapter_cls, count: int) -> int:
+        if count != 1:
+            raise ValueError(
+                "Protocol adapters create one account per run; bulk creation requires separate approval"
+            )
+        success_count = 0
+        self.log("info", f"Starting protocol session (target count: {count}, no browser)...")
+
+        for idx in range(1, count + 1):
+            self.log("info", f"=== Processing protocol task [{idx}/{count}] ===")
+            adapter = adapter_cls(None, None, self.config)
+            task_start = time.time()
+            try:
+                ok = adapter.run()
+                elapsed = round(time.time() - task_start, 2)
+                if ok:
+                    # Cookie sidecar first: a ledger line is only written once
+                    # activation is verified AND its playback cookies exist.
+                    self._export_cookies(adapter)
+                    self.save_success(adapter.account_data)
+                    success_count += 1
+                    self.log("success", f"Protocol task [{idx}/{count}] succeeded in {elapsed}s.")
+                else:
+                    self._save_pending_activation(adapter)
+                    self.log("warn", f"Protocol task [{idx}/{count}] incomplete after {elapsed}s.")
+            except Exception as e:
+                elapsed = round(time.time() - task_start, 2)
+                self.log("error", f"Protocol task [{idx}/{count}] failed after {elapsed}s: {e}")
+                if adapter.pending_activation:
+                    self._save_pending_activation(adapter)
+                self.save_failed(str(e), adapter.account_data)
+                if getattr(e, "stop_run", False):
+                    self.log("warn", "Blocking response detected; stopping the batch immediately (no retries).")
+                    break
+
+        self.log("info", f"Protocol session completed. Success: {success_count}/{count}")
+        return success_count
+
+    def _execute_browser_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
         success_count = 0
         mode_desc = f"external CDP ({self.cdp_endpoint})" if self.cdp_endpoint else f"desktop browser (headless={self.headless})"
         self.log("info", f"Starting automation session (target count: {count}, mode: {mode_desc}, stealth: {self.enable_stealth})...")
