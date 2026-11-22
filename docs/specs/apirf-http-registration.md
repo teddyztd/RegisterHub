@@ -21,7 +21,7 @@ Tracker: GitHub Issues in `teddyztd/RegisterHub`.
 
 ## Implementation Decisions
 
-- The observed endpoint sequence is `POST /api/auth/guest`, `POST /api/auth/guest/upgrade`, the emailed `GET /api/auth/email/confirm/<token>`, then `GET /api/auth/me`. Do not hardcode the recorded account, mailbox, Cookie, or confirmation token.
+- The only target origin is `https://apirf.ru`. The observed endpoint sequence is `POST https://apirf.ru/api/auth/guest`, `POST https://apirf.ru/api/auth/guest/upgrade`, the emailed `GET https://apirf.ru/api/auth/email/confirm/<token>`, then `GET https://apirf.ru/api/auth/me`. Do not hardcode the recorded account, mailbox, Cookie, or confirmation token; do not substitute any other domain.
 - Success requires an authenticated identity response with `email_verified=true` and `is_guest=false`. Mail sent, HTTP 200 alone, guest creation, or a non-empty response is not success.
 - The same Session must carry cookies through confirmation and identity verification. Export `name`, `value`, `domain`, `path`, `expires`, `httpOnly`, `secure`, and `sameSite` where available to `results/cookies/<login>.json`.
 - Keep the existing `email----password----username` ledger compatible. Preserve the APIrf login in the username field or an equivalent documented mapping; do not insert JSON into delimiter-separated records.
