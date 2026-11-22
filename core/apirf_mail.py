@@ -37,6 +37,7 @@ from core.mail_client import (
 
 APIRF_CONFIRM_HOSTS = ("apirf.ru",)
 APIRF_CONFIRM_PATH = "/api/auth/email/confirm/"
+APIRF_CONFIRM_WEB_PATH = "/podtverdit"
 
 _LINK_HREF_RE = re.compile(
     r"""href\s*=\s*(?:
@@ -82,12 +83,26 @@ def extract_apirf_confirmation_link(text: str) -> Optional[str]:
         except ValueError:  # malformed port in an untrusted email
             continue
         path = urllib.parse.unquote(parsed.path or "")
-        if not path.startswith(APIRF_CONFIRM_PATH):
+        if path.startswith(APIRF_CONFIRM_PATH):
+            token = path[len(APIRF_CONFIRM_PATH):]
+            if token and "/" not in token:
+                return candidate
             continue
-        token = path[len(APIRF_CONFIRM_PATH):]
-        if not token or "/" in token:
-            continue
-        return candidate
+
+        # The live email links to the web form /podtverdit?token=... rather
+        # than the API path. Normalize it to the canonical API confirmation
+        # URL so the adapter's GET performs the actual confirmation, and
+        # reject a missing token or a token containing path separators.
+        if path == APIRF_CONFIRM_WEB_PATH:
+            query = urllib.parse.parse_qs(parsed.query or "")
+            token = (query.get("token") or [""])[0]
+            if token and "/" not in token:
+                return (
+                    f"https://{parsed.hostname}{APIRF_CONFIRM_PATH}"
+                    f"{urllib.parse.quote(token, safe='')}"
+                )
+
+        continue
 
     return None
 

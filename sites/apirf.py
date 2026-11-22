@@ -7,8 +7,10 @@ protocol against https://apirf.ru -- no browser, no Playwright:
     POST /api/auth/guest
     POST /api/auth/guest/upgrade      {login, password, email}
     GET  /api/auth/email/confirm/<token>   (link read from the mailbox)
-    GET  /api/auth/me                 success iff email_verified is exactly
-                                      True AND is_guest is exactly False
+    POST /api/auth/login              {login, password}
+    GET  /api/auth/me                 success iff user.email_verified is
+                                      exactly True AND user.is_guest is
+                                      exactly False
 
 Safety properties:
 * requires_browser = False -> Runner uses the protocol path, never launches
@@ -176,8 +178,20 @@ class ApirfAdapter(BaseSiteAdapter):
             return False
         self._get(link)
 
-        # 5. Activation gate: exact booleans only.
-        me = self._get(self.base_url + "/api/auth/me").json() or {}
+        # 5. Establish an authenticated session after email confirmation. The
+        # upgraded guest cookie is not sufficient for the final identity gate.
+        self._post("/api/auth/login", json={
+            "login": identity["username"],
+            "password": identity["password"],
+        })
+
+        # 6. Activation gate: exact booleans only, read from the user object
+        # in /api/auth/me on the same session. The login response body is not
+        # trusted for this decision.
+        payload = self._get(self.base_url + "/api/auth/me").json() or {}
+        me = payload.get("user") if isinstance(payload, dict) else None
+        if not isinstance(me, dict):
+            me = {}
         if me.get("email_verified") is True and me.get("is_guest") is False:
             return True
         self._set_pending("identity")

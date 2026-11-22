@@ -183,7 +183,7 @@ AI 将直接对照你跑通的真实人类行为路径进行精确代码装配�
 
 ### 5. APIrf 纯 HTTP 单账号注册
 
-`apirf` 适配器的唯一目标是 **https://apirf.ru**。它使用同一个 HTTP 会话完成访客创建、账号绑定、邮件确认和身份校验，不启动浏览器。
+`apirf` 适配器的唯一目标是 **https://apirf.ru**。它使用同一个 HTTP 会话完成访客创建、账号绑定、邮件确认、登录和身份校验，不启动浏览器。
 
 在本地 `config.json` 中配置 `apirf.mail.im215_api_key`，或改用环境变量 `APIRF_215_API_KEY`；不要把真实密钥写入仓库。PowerShell 示例：
 
@@ -212,7 +212,7 @@ python main.py --run apirf --count 1
 | `results/cookies/<login>.json` | 成功台账写入前导出的非空会话 Cookie，包含 `name`、`value`、`domain`、`path`、`expires`、`httpOnly`、`secure`、`sameSite` |
 | `results/pending_activation/<login>.json` | 激活未完成时保存恢复信息，并标明 `confirmation` 或 `identity` 阶段；不会同时写入成功台账或 Cookie |
 
-**严格成功门禁**：确认链接必须属于 `https://apirf.ru` 的官方确认路径，随后 `GET /api/auth/me` 必须返回严格的 `email_verified: true` 与 `is_guest: false`，且会话 Cookie 非空，才判定成功。遇到人机验证、访问拒绝、HTTP 403/429 或频控信号时立即停止，不做重试风暴。
+**严格成功门禁**：确认链接必须属于 `https://apirf.ru` 的官方确认路径；随后使用同一会话执行登录，`GET /api/auth/me` 的 `user` 对象必须返回严格的 `email_verified: true` 与 `is_guest: false`，且会话 Cookie 非空，才判定成功。登录响应本身不作为成功依据。遇到人机验证、访问拒绝、HTTP 403/429 或频控信号时立即停止，不做重试风暴。
 
 **默认仅授权上述单账号验收；批量账号生命周期测试与压力测试均未获默认授权，必须另行明确批准。** `results/` 中的账号、Cookie 与待激活记录属于本地敏感产物，不得提交到仓库。
 

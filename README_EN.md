@@ -183,7 +183,7 @@ The AI will precisely map and automate your verified human interaction chain, el
 
 ### 5. APIrf Pure-HTTP Single-Account Registration
 
-The `apirf` adapter targets only **https://apirf.ru**. One HTTP session handles guest creation, account binding, email confirmation, and identity verification without launching a browser.
+The `apirf` adapter targets only **https://apirf.ru**. One HTTP session handles guest creation, account binding, email confirmation, login, and identity verification without launching a browser.
 
 Set `apirf.mail.im215_api_key` in the local `config.json`, or use the `APIRF_215_API_KEY` environment variable instead. Never commit a real key. PowerShell example:
 
@@ -212,7 +212,7 @@ Artifacts are written under `output_dir` (default `./results`):
 | `results/cookies/<login>.json` | Exports the non-empty session cookies before the success ledger, with `name`, `value`, `domain`, `path`, `expires`, `httpOnly`, `secure`, and `sameSite` |
 | `results/pending_activation/<login>.json` | Stores recovery data with stage `confirmation` or `identity` when activation is incomplete; no success ledger or cookie artifact is written |
 
-**Strict success gate:** the confirmation link must use the official confirmation path on `https://apirf.ru`; the following `GET /api/auth/me` must return the literal values `email_verified: true` and `is_guest: false`, and the session cookie jar must be non-empty. A captcha, access-denied response, HTTP 403/429, or rate-limit signal stops the run immediately without a retry storm.
+**Strict success gate:** the confirmation link must use the official confirmation path on `https://apirf.ru`; the session then logs in on the same HTTP session, and the `user` object from `GET /api/auth/me` must contain the literal values `email_verified: true` and `is_guest: false`, with a non-empty session cookie jar. The login response itself is not used as proof of success. A captcha, access-denied response, HTTP 403/429, or rate-limit signal stops the run immediately without a retry storm.
 
 **Only the single-account acceptance run above is authorized by default. Bulk account-lifecycle testing and pressure testing are not authorized by default and require separate explicit approval.** Accounts, cookies, and pending-activation records under `results/` are sensitive local artifacts and must not be committed.
 

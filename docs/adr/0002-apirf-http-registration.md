@@ -2,7 +2,7 @@
 
 ## 状态
 
-已接受，待实现。
+已接受，已实现并通过真实单号验收。
 
 ## 背景
 
@@ -10,9 +10,9 @@ RegisterHub 的默认适配器生命周期会启动 Playwright 并打开目标�
 
 ## 决策
 
-APIrf 使用一个 `requests.Session` 完成访客创建、凭据绑定、确认链接请求和 `/api/auth/me` 身份校验，不为协议流程启动浏览器。运行器为协议适配器提供明确的无浏览器路径；同一 Session 的 Cookie 以标准 JSON 数组写入每账号 sidecar，现有 `accounts.txt` 格式保持不变。
+APIrf 使用一个 `requests.Session` 完成访客创建、凭据绑定、确认链接请求、登录和 `/api/auth/me` 身份校验，不为协议流程启动浏览器。运行器为协议适配器提供明确的无浏览器路径；同一 Session 的 Cookie 以标准 JSON 数组写入每账号 sidecar，现有 `accounts.txt` 格式保持不变。
 
-邮箱按 215.im、mail.tm、tempmail.io、guerrillamail 的顺序选择。只有尚未向 APIrf 提交邮箱地址时才允许切换通道；提交后必须在原邮箱轮询。确认链接只接受 APIrf 官方域名和预期确认路径。邮件确认后必须同时满足 `email_verified=true` 与 `is_guest=false` 才写成功台账；中间状态写入待激活恢复记录。215.im 凭据只从本地配置或环境读取，不进入提交内容。
+邮箱按 215.im、mail.tm、tempmail.io、guerrillamail 的顺序选择。只有尚未向 APIrf 提交邮箱地址时才允许切换通道；提交后必须在原邮箱轮询。确认链接只接受 APIrf 官方域名和预期确认路径；真实邮件中的 `/podtverdit?token=...` 表单链接被归一化为 `https://apirf.ru/api/auth/email/confirm/<token>` 后才允许 GET。邮件确认后使用同一会话登录，`/api/auth/me` 的 `user` 对象同时满足 `email_verified=true` 与 `is_guest=false` 才写成功台账；登录响应本身不作为成功依据。中间状态写入待激活恢复记录。215.im 凭据只从本地配置或环境读取，不进入提交内容。
 
 首次真实验收只运行一个账号，遇到验证码、访问拒绝或限流立即停止。多账号压力测试不属于本决策的默认执行范围，必须单独批准。
 
