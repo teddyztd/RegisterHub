@@ -6,7 +6,7 @@ RegisterHub has no APIrf adapter. A successful APIrf registration is not merely 
 
 ## Solution
 
-Add an automatically discovered `apirf` adapter that uses one `requests.Session` for guest creation, credential binding, the official email-confirmation request, and `/api/auth/me`. Add an explicit no-browser protocol path to the runner. Use 215.im as the primary mailbox provider, with mail.tm, tempmail.io, and guerrillamail as creation-time fallbacks. Preserve successful credentials in the existing ledger and write a standard Cookie JSON array per account. Preserve incomplete accounts separately as pending activation.
+Add an automatically discovered `apirf` adapter that uses one `requests.Session` for guest creation, credential binding, the official email-confirmation request, and `/api/auth/me`. Add an explicit no-browser protocol path to the runner. Use 215.im as the mailbox provider (revised by #7: APIrf never delivers confirmation mail to public disposable domains, so the public providers are not usable fallbacks). Preserve successful credentials in the existing ledger and write a standard Cookie JSON array per account. Preserve incomplete accounts separately as pending activation.
 
 Feature slug: `apirf-http-registration`.
 Integration branch: `feat/apirf-http-registration`.
@@ -26,7 +26,7 @@ Tracker: GitHub Issues in `teddyztd/RegisterHub`.
 - The same Session must carry cookies through confirmation and identity verification. Export `name`, `value`, `domain`, `path`, `expires`, `httpOnly`, `secure`, and `sameSite` where available to `results/cookies/<login>.json`.
 - Keep the existing `email----password----username` ledger compatible. Preserve the APIrf login in the username field or an equivalent documented mapping; do not insert JSON into delimiter-separated records.
 - Pending activation records live separately under the results directory and may include the bound credentials, mailbox recovery data, and failure stage. They are local sensitive artifacts and must not be committed.
-- Mailbox order is 215.im, mail.tm, tempmail.io, guerrillamail. Failover is allowed before an address is submitted to APIrf; after submission, polling remains bound to that mailbox.
+- Mailbox route is 215.im only (revised by #7; see ADR 0002). A missing 215.im key fails the run before any APIrf request instead of falling back to a provider that cannot receive the confirmation mail. After an address is submitted, polling remains bound to that mailbox.
 - The 215.im API key is read from local `config.json` or the environment, never committed or logged. Public-provider behavior follows the reference design but must not fabricate a local email address.
 - Extract confirmation links from message text/HTML and accept only the intended APIrf HTTPS host and confirmation path. Ignore welcome, footer, tracking, and unrelated links.
 - The protocol adapter path avoids Playwright startup. Existing browser adapters and their behavior remain unchanged.

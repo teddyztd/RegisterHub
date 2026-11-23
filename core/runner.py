@@ -190,9 +190,13 @@ class StandardRunner:
 
         for idx in range(1, count + 1):
             self.log("info", f"=== Processing protocol task [{idx}/{count}] ===")
-            adapter = adapter_cls(None, None, self.config)
+            adapter = None
             task_start = time.time()
             try:
+                # Construction runs provider/config gates (e.g. a missing
+                # 215.im key) before any network call; an exception here must
+                # still be recorded instead of escaping the batch.
+                adapter = adapter_cls(None, None, self.config)
                 ok = adapter.run()
                 elapsed = round(time.time() - task_start, 2)
                 if ok:
@@ -208,9 +212,9 @@ class StandardRunner:
             except Exception as e:
                 elapsed = round(time.time() - task_start, 2)
                 self.log("error", f"Protocol task [{idx}/{count}] failed after {elapsed}s: {e}")
-                if adapter.pending_activation:
+                if getattr(adapter, "pending_activation", None):
                     self._save_pending_activation(adapter)
-                self.save_failed(str(e), adapter.account_data)
+                self.save_failed(str(e), getattr(adapter, "account_data", None) or {})
                 if getattr(e, "stop_run", False):
                     self.log("warn", "Blocking response detected; stopping the batch immediately (no retries).")
                     break

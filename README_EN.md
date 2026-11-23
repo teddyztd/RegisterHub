@@ -200,9 +200,9 @@ python main.py --run apirf --count 1
 | `apirf.mail.http_timeout_secs` | `20` | Timeout in seconds for each APIrf or mailbox HTTP request |
 | `apirf.mail.confirmation_timeout_secs` | `300` | Overall timeout in seconds while waiting for the confirmation email |
 
-The target origin is fixed at `https://apirf.ru`; the mailbox order is fixed at `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail`. Neither can be replaced by configuration.
+The target origin is fixed at `https://apirf.ru`; the APIrf mailbox route is fixed at `215.im` only. Neither can be replaced by configuration.
 
-Providers fail over in this order only before an address is submitted to APIrf. After submission, the same mailbox remains pinned for polling; the run does not switch addresses and retry.
+APIrf never delivers confirmation mail to public disposable domains such as `mail.tm`, `tempmail.io`, or `guerrillamail`, so those providers are not usable fallbacks for this site. Without a 215.im key the adapter fails at construction time -- before any APIrf HTTP request -- and records a clear reason in `failed.txt` instead of creating a mailbox and waiting out the confirmation timeout. After an address is submitted to APIrf, the same mailbox remains pinned for polling; the run does not switch addresses and retry.
 
 Artifacts are written under `output_dir` (default `./results`):
 

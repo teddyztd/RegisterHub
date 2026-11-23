@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
+from core.mail_client import MailboxError
 from core.runner import StandardRunner
 from sites.apirf import ApirfBlockedError
 
@@ -82,6 +83,35 @@ class CrashingAdapter(SuccessAdapter):
 
     def run(self):
         raise RuntimeError("identity verification exploded")
+
+
+class ConstructionFailAdapter:
+    """Adapter that refuses to construct (e.g. the 215.im key is missing).
+
+    A configuration gate must surface as a recorded failure, not as a crash
+    that escapes the runner before it can write failed.txt.
+    """
+
+    requires_browser = False
+
+    def __init__(self, page, context, config):
+        raise MailboxError("APIrf requires the 215.im mailbox: set APIRF_215_API_KEY")
+
+    def run(self):  # pragma: no cover - never reached
+        return True
+
+
+def test_protocol_construction_failure_is_recorded_and_does_not_crash(tmp_path):
+    runner = make_runner(tmp_path)
+
+    with patch("core.runner.sync_playwright", side_effect=AssertionError("browser must not start")):
+        assert runner.execute_adapter(ConstructionFailAdapter, count=1) == 0
+
+    assert not (tmp_path / "accounts.txt").exists()
+    assert not (tmp_path / "cookies").exists()
+    assert not (tmp_path / "pending_activation").exists()
+    failed = (tmp_path / "failed.txt").read_text(encoding="utf-8")
+    assert "APIrf requires the 215.im mailbox" in failed
 
 
 def test_protocol_success_never_starts_browser_and_exports_ledger_and_cookies(tmp_path):

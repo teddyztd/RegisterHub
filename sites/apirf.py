@@ -33,7 +33,13 @@ import requests
 
 from core.adapter import BaseSiteAdapter
 from core.identity import generate_identity
-from core.apirf_mail import ApirfMailRouter, Im215Mailbox, extract_apirf_confirmation_link
+from core.mail_client import MailboxError
+from core.apirf_mail import (
+    APIRF_MAIL_PROVIDER_ORDER,
+    ApirfMailRouter,
+    Im215Mailbox,
+    extract_apirf_confirmation_link,
+)
 
 APIRF_BASE_URL = "https://apirf.ru"
 
@@ -87,17 +93,31 @@ class ApirfAdapter(BaseSiteAdapter):
 
         The 215.im API key is read from config or APIRF_215_API_KEY and passed
         only into the Im215Mailbox header path -- never logged or submitted to
-        APIrf. A missing key makes 215.im fail at creation time and the route
-        fails over to the public providers, exactly as the ADR requires.
+        APIrf.
+
+        APIrf sends confirmation mail only to 215.im's own domains, so the
+        public disposable providers cannot serve as fallbacks: a missing key
+        fails here, before any HTTP request, instead of burning the whole
+        confirmation timeout on a mailbox that will never receive anything.
         """
         api_key = mail_cfg.get("im215_api_key") or os.environ.get("APIRF_215_API_KEY", "")
+        if not api_key:
+            raise MailboxError(
+                "APIrf requires the 215.im mailbox: set APIRF_215_API_KEY "
+                "(or apirf.mail.im215_api_key in config.json). Public providers "
+                "(mail.tm / tempmail.io / guerrillamail) never receive APIrf "
+                "confirmation mail, so the run stops before contacting APIrf."
+            )
         timeout = mail_cfg.get("http_timeout_secs", 20)
-        # The spec fixes the mailbox order. Only provider credentials and
-        # transport knobs are configurable; provider_order is not a knob.
         factories = {
             "215.im": lambda: Im215Mailbox(api_key=api_key, timeout=timeout, trust_env=trust_env),
         }
-        return ApirfMailRouter(factories=factories, timeout=timeout, trust_env=trust_env)
+        return ApirfMailRouter(
+            factories=factories,
+            timeout=timeout,
+            trust_env=trust_env,
+            provider_order=list(APIRF_MAIL_PROVIDER_ORDER),
+        )
 
     # -- BaseSiteAdapter interface -----------------------------------------
 

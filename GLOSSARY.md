@@ -41,8 +41,8 @@ An account whose guest and binding steps may have succeeded but whose email conf
 _Avoid_: Successful account, disposable failed attempt
 
 **Mailbox Route**:
-The ordered temporary-mail policy for APIrf: 215.im first, then mail.tm, tempmail.io, and guerrillamail. Failover must not silently replace an address already submitted to APIrf.
-_Avoid_: Arbitrary mailbox retry, fabricated local address
+The APIrf mailbox policy: 215.im is the only provider, because APIrf never delivers confirmation mail to public disposable domains. A missing 215.im key fails the run before any APIrf request. The route must not switch to another address after submission.
+_Avoid_: Arbitrary mailbox retry, public temporary-mail fallback, fabricated local address
 
 **Cookie Sidecar**:
 The per-account standard Cookie JSON array written under `results/cookies/` from the same HTTP session used for registration and identity verification.

@@ -219,6 +219,12 @@ class Im215Mailbox:
 
 PROVIDER_ORDER = ("215.im", "mail.tm", "tempmail.io", "guerrillamail")
 
+# APIrf only delivers confirmation mail to mailboxes on 215.im's own domains.
+# The public disposable providers (mail.tm / tempmail.io / guerrillamail) never
+# receive it, so the APIrf route must not treat them as usable fallbacks: a
+# run that lands there burns the whole confirmation timeout before failing.
+APIRF_MAIL_PROVIDER_ORDER = ("215.im",)
+
 
 class ApirfMailRouter:
     """Creation-time failover mailbox route for the APIrf adapter.

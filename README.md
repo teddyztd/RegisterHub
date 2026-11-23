@@ -200,9 +200,9 @@ python main.py --run apirf --count 1
 | `apirf.mail.http_timeout_secs` | `20` | 单次 APIrf 或邮箱 HTTP 请求超时（秒） |
 | `apirf.mail.confirmation_timeout_secs` | `300` | 等待确认邮件的总超时（秒） |
 
-目标域名固定为 `https://apirf.ru`，不能通过配置替换；邮箱服务商顺序固定为 `215.im` → `mail.tm` → `tempmail.io` → `guerrillamail`，也不可通过配置改写。
+目标域名固定为 `https://apirf.ru`，不能通过配置替换；APIrf 的邮箱路由固定为 `215.im` 单一通道，不可通过配置改写。
 
-邮箱服务商只按上述顺序在地址尚未提交给 APIrf 前回退；地址一经提交，后续收信固定使用同一邮箱，不会换号重试。
+APIrf 从不向 `mail.tm`、`tempmail.io`、`guerrillamail` 这类公共临时邮箱域名投递确认信，因此这些通道在 APIrf 场景不是可用回退：未提供 215.im 密钥时，适配器会在构造阶段（任何 APIrf HTTP 请求之前）立即失败并在 `failed.txt` 记录明确原因，而不是创建邮箱后白等确认超时。地址一经提交给 APIrf，后续收信固定使用同一邮箱，不会换号重试。
 
 产物写入 `output_dir`（默认 `./results`）：
 

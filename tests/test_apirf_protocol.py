@@ -361,13 +361,15 @@ def router_not_created(adapter):
     return adapter.mail_router.create_calls == 0
 
 
-def test_adapter_default_session_bypasses_system_proxy():
+def test_adapter_default_session_bypasses_system_proxy(monkeypatch):
+    monkeypatch.setenv("APIRF_215_API_KEY", "AC-test")
     adapter = ApirfAdapter(config={"apirf": {}})
 
     assert adapter.session.trust_env is False
 
 
-def test_adapter_trust_env_true_keeps_system_proxy():
+def test_adapter_trust_env_true_keeps_system_proxy(monkeypatch):
+    monkeypatch.setenv("APIRF_215_API_KEY", "AC-test")
     adapter = ApirfAdapter(config={"apirf": {"http": {"trust_env": True}}})
 
     assert adapter.session.trust_env is True
@@ -410,7 +412,43 @@ def test_adapter_mailbox_order_cannot_be_overridden_by_config():
         trust_env=False,
     )
 
-    assert router._order == list(PROVIDER_ORDER)
+    assert router._order == ["215.im"]
+
+
+def test_default_mailbox_order_contains_only_215_im():
+    """APIrf never sends confirmation mail to the public disposable domains,
+    so the default route must not include mail.tm / tempmail.io / guerrillamail."""
+    router = ApirfAdapter._build_default_router({"im215_api_key": "test-key"}, trust_env=False)
+
+    assert router._order == ["215.im"]
+
+
+def test_missing_215_key_fails_fast_before_any_apirf_request(monkeypatch):
+    """Without an API key the route can only fall back to providers APIrf
+    never mails -- the run must abort before the first HTTP request."""
+    monkeypatch.delenv("APIRF_215_API_KEY", raising=False)
+    session = FakeSession([])
+
+    with pytest.raises(MailboxError, match="215\\.im"):
+        ApirfAdapter(config={}, session=session)
+
+    assert session.calls == []
+
+
+def test_missing_215_key_error_names_the_env_var(monkeypatch):
+    monkeypatch.delenv("APIRF_215_API_KEY", raising=False)
+
+    with pytest.raises(MailboxError) as excinfo:
+        ApirfAdapter(config={}, session=FakeSession([]))
+
+    assert "APIRF_215_API_KEY" in str(excinfo.value)
+
+
+def test_explicit_215_key_still_builds_a_working_router(monkeypatch):
+    monkeypatch.setenv("APIRF_215_API_KEY", "AC-live")
+    adapter = ApirfAdapter(config={}, session=FakeSession([]), mail_router=FakeMailRouter())
+
+    assert adapter.mail_router is not None
 
 
 def test_poll_retries_a_message_whose_body_read_was_transiently_empty():
