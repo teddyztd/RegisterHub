@@ -47,3 +47,7 @@ _Avoid_: Arbitrary mailbox retry, public temporary-mail fallback, fabricated loc
 **Cookie Sidecar**:
 The per-account standard Cookie JSON array written under `results/cookies/` from the same HTTP session used for registration and identity verification.
 _Avoid_: Browser storage state, account-ledger delimiter payload
+
+**Rejection Diagnostics**:
+The sanitized record emitted when mailbox polling receives a message that contains no supported confirmation link: provider, safe message metadata, and per-link rejection reasons (scheme, host, token-free path). Tokens, credentials, cookie values and message bodies are never included.
+_Avoid_: Raw email body, error dump, credential echo
