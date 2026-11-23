@@ -191,7 +191,7 @@ class ApirfAdapter(BaseSiteAdapter):
             # unsupported confirmation email is reported immediately in the
             # pending-activation record (provider, safe message metadata and
             # rejection reasons; never tokens, credentials or bodies).
-            diagnostics = getattr(self.mail_router, "rejection_diagnostics", [])
+            diagnostics = self.mail_router.rejection_diagnostics
             if diagnostics:
                 self._set_pending("confirmation")
                 self.pending_activation["diagnostics"] = list(diagnostics)

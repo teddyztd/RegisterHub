@@ -26,9 +26,9 @@ DEFAULT_IM215_PROBE_PATH = "/messages"
 DEFAULT_APIRF_PROBE_PATH = "/api/auth/me"
 
 # Statuses that mean "the request was authenticated and handled" for the
-# mailbox probe. 400/422 are validation complaints about probe parameters,
-# which still prove the credential itself was accepted.
-_MAILBOX_ACCEPTED = {200, 204, 400, 422}
+# mailbox probe. Only an explicit success proves the credential was accepted;
+# 400/422 could equally be a broken probe path and must not pass.
+_MAILBOX_ACCEPTED = {200, 204}
 # Any answered request proves reachability; redirects are not followed.
 _NETWORK_REACHABLE = {200, 302, 401, 403}
 
@@ -51,6 +51,12 @@ class ReadOnlySession:
     def get(self, url, **kwargs):
         return self._session.get(url, **kwargs)
 
+    def head(self, url, **kwargs):
+        return self._session.head(url, **kwargs)
+
+    def options(self, url, **kwargs):
+        return self._session.options(url, **kwargs)
+
     def _refuse(self, verb):
         def refused(*args, **kwargs):
             raise ReadOnlyViolation(
@@ -58,6 +64,7 @@ class ReadOnlySession:
             )
         return refused
 
+    request = property(lambda self: self._refuse("request"))
     post = property(lambda self: self._refuse("post"))
     put = property(lambda self: self._refuse("put"))
     patch = property(lambda self: self._refuse("patch"))
@@ -92,11 +99,12 @@ def _is_utf8(encoding) -> bool:
 
 
 def check_console_encoding(stdout=None, stderr=None) -> CheckResult:
-    """Verify both console streams emit UTF-8, repairing them when possible.
+    """Verify both console streams start as UTF-8.
 
     A legacy Windows codepage (GBK, cp1252, ...) mangles Chinese diagnostics
-    and can crash prints outright. TextIOWrapper streams can be reconfigured
-    in place; anything else must be fixed by the operator before a live run.
+    and can crash prints outright. Streams are reconfigured in place so the
+    report can print, but the check still fails: the missing environment
+    setting is a blocking problem the operator must fix before a live run.
     """
     import sys
 
@@ -109,28 +117,29 @@ def check_console_encoding(stdout=None, stderr=None) -> CheckResult:
         encoding = getattr(stream, "encoding", None)
         if _is_utf8(encoding):
             continue
+        # Repair in place so the report itself cannot crash, but the check
+        # still fails: the operator must fix the environment, not rely on an
+        # in-process reconfigure that the next run will not have.
         try:
             stream.reconfigure(encoding="utf-8")
         except Exception:
-            bad.append(f"{label}={encoding}")
-            continue
+            pass
         if _is_utf8(getattr(stream, "encoding", None)):
             repaired.append(label)
-        else:
-            bad.append(f"{label}={encoding}")
+        bad.append(f"{label}={encoding}")
 
     if bad:
+        detail = "console streams started without UTF-8: " + ", ".join(bad)
+        if repaired:
+            detail += f" ({', '.join(repaired)} reconfigured for this process only)"
         return CheckResult(
             name="Console encoding",
             ok=False,
-            detail="non-UTF-8 console streams: " + ", ".join(bad),
+            detail=detail,
             hint="run 'chcp 65001' or set PYTHONIOENCODING=utf-8 / PYTHONUTF8=1 "
                  "before the live run",
         )
-    detail = "stdout/stderr are UTF-8"
-    if repaired:
-        detail += f" ({', '.join(repaired)} reconfigured from a legacy codepage)"
-    return CheckResult(name="Console encoding", ok=True, detail=detail)
+    return CheckResult(name="Console encoding", ok=True, detail="stdout/stderr are UTF-8")
 
 
 def check_mailbox_probe(settings: PreflightSettings, session) -> CheckResult:

@@ -29,6 +29,7 @@ from core.worktree_cleanup import (  # noqa: E402
     ScanResult,
     archive_live_artifacts,
     git_remove_worktree,
+    git_status_porcelain,
     scan_artifacts,
 )
 
@@ -90,8 +91,30 @@ def _do_remove(worktree: Path, dest: Path | None) -> int:
         except (ValueError, FileExistsError, OSError) as exc:
             return _refuse(f"archive refused: {exc}")
         print(f"archived {len(moved)} live artifact(s) to {dest}")
+        for target in moved:
+            print(f"  -> {target}")
     else:
         print("no live artifacts found")
+
+    # Guard against tracked changes and untracked non-ignored files that
+    # `git worktree remove --force` would silently discard.
+    status = git_status_porcelain(worktree)
+    if status.returncode != 0:
+        return _refuse(f"git status failed: {status.stderr.strip()}")
+    if status.stdout.strip():
+        return _refuse(
+            "refusing to remove worktree with uncommitted or untracked "
+            "non-ignored changes; commit or discard them first"
+        )
+
+    # Re-scan immediately before removal: a concurrent writer may have
+    # produced a new live artifact after the archive step.
+    if scan_artifacts(worktree).live:
+        return _refuse(
+            "refusing to remove worktree: live artifacts appeared after "
+            "archiving; run check and archive again"
+        )
+
     result = git_remove_worktree(worktree)
     if result.returncode != 0:
         print(

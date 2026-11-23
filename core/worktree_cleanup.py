@@ -61,30 +61,24 @@ class ScanResult:
         return [a for a in self.artifacts if a.kind != KIND_DEMO]
 
 
-def _is_demo_ledger_row(line: str) -> bool:
-    """True for a valid credential row on the offline Demo domain.
+def _ledger_row_kind(line: str):
+    """Classify one ledger line.
 
-    The Demo adapter generates identities on ``demo-community.org`` only;
-    a row with that domain is offline demo output, not a live credential.
+    Returns ``KIND_DEMO`` for validated offline demo credentials,
+    ``KIND_LEDGER`` for anything else that looks like a credential row, and
+    ``None`` for blank/unrelated lines. A row containing ``----`` but failing
+    validation is still treated as live: fail-safe beats silently discarding a
+    malformed real credential.
     """
     line = line.strip()
     if not line or "----" not in line:
-        return False
+        return None
     parts = [part.strip() for part in line.split("----")]
     if len(parts) < 3 or not all(parts[:3]):
-        return False
-    return parts[0].endswith("@" + DEMO_EMAIL_DOMAIN)
-
-
-def _is_live_ledger_row(line: str) -> bool:
-    """True for a valid credential row that is not offline demo output."""
-    line = line.strip()
-    if not line or "----" not in line:
-        return False
-    parts = [part.strip() for part in line.split("----")]
-    if len(parts) < 3 or not all(parts[:3]):
-        return False
-    return not parts[0].endswith("@" + DEMO_EMAIL_DOMAIN)
+        return KIND_LEDGER
+    if parts[0].endswith("@" + DEMO_EMAIL_DOMAIN):
+        return KIND_DEMO
+    return KIND_LEDGER
 
 
 def _json_under_dir(results: Path, dirname: str) -> List[Path]:
@@ -117,13 +111,10 @@ def scan_artifacts(worktree: Path) -> ScanResult:
             except OSError:
                 continue
             for line in content.splitlines():
-                if _is_live_ledger_row(line):
+                kind = _ledger_row_kind(line)
+                if kind is not None:
                     scan.artifacts.append(
-                        Artifact(KIND_LEDGER, ledger, detail=line.strip())
-                    )
-                elif _is_demo_ledger_row(line):
-                    scan.artifacts.append(
-                        Artifact(KIND_DEMO, ledger, detail=line.strip())
+                        Artifact(kind, ledger, detail=line.strip())
                     )
 
     for path in _json_under_dir(results, COOKIE_DIR):
@@ -165,6 +156,21 @@ def archive_live_artifacts(scan: ScanResult, dest: Path) -> List[Path]:
         shutil.move(str(artifact.path), str(target))
         moved.append(target)
     return moved
+
+
+def git_status_porcelain(worktree: Path) -> subprocess.CompletedProcess:
+    """Return ``git status --porcelain`` for a worktree.
+
+    Ignored files are excluded by default, so protected ``results/`` artifacts
+    do not make a worktree look dirty. Any output means tracked changes or
+    untracked non-ignored files exist and must be reviewed before ``--force``
+    removal.
+    """
+    return subprocess.run(
+        ["git", "-C", str(worktree), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
 
 
 def git_remove_worktree(worktree: Path) -> subprocess.CompletedProcess:

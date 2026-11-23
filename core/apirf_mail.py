@@ -58,8 +58,14 @@ _PLAIN_URL_RE = re.compile(r"(?<![\w=?&])https://[^\s<>\"']+", re.IGNORECASE)
 
 # A long unbroken run of URL-safe characters is treated as an opaque secret
 # (confirmation token, API key...) and redacted wherever it could otherwise
-# surface: rejected path tails and safe message metadata.
-_TOKEN_RUN_RE = re.compile(r"[A-Za-z0-9_\-]{24,}")
+# surface: rejected path tails and safe message metadata. Secret-shaped query
+# parameters are redacted at any length via _SECRET_PARAM_RE.
+_TOKEN_RUN_RE = re.compile(r"[A-Za-z0-9_\-]{16,}")
+# Secret-bearing query parameters are redacted regardless of value length, so
+# a short token in ``?token=abc123`` cannot leak through safe metadata.
+_SECRET_PARAM_RE = re.compile(
+    r"(?i)\b(token|key|secret|code|password|pass|pwd)=([^&\s\"']+)"
+)
 _REDACTED = "<redacted>"
 
 # Envelope fields that are safe to report: they never carry the confirmation
@@ -201,6 +207,9 @@ def extract_apirf_confirmation_link(text: str) -> Optional[str]:
 
 def _redact_token_runs(value: Any) -> Any:
     if isinstance(value, str):
+        value = _SECRET_PARAM_RE.sub(
+            lambda match: match.group(1) + "=" + _REDACTED, value
+        )
         return _TOKEN_RUN_RE.sub(_REDACTED, value)
     return value
 

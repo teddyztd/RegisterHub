@@ -9,4 +9,18 @@
 set -e
 
 echo "pre-commit: running pytest gate" >&2
-python -m pytest
+
+if [ -x ".venv/Scripts/python.exe" ]; then
+    PY=".venv/Scripts/python.exe"
+elif [ -x ".venv/bin/python" ]; then
+    PY=".venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PY="python3"
+elif command -v python >/dev/null 2>&1; then
+    PY="python"
+else
+    echo "pre-commit: no Python interpreter found (expected .venv or python3/python on PATH)" >&2
+    exit 1
+fi
+
+exec "$PY" -m pytest

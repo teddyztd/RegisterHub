@@ -42,7 +42,8 @@ def _init_repo(tmp_path: Path) -> Path:
     assert _git("config", "user.email", "test@example.com", cwd=repo).returncode == 0
     assert _git("config", "user.name", "Test", cwd=repo).returncode == 0
     (repo / "README.md").write_text("base\n", encoding="utf-8")
-    assert _git("add", "README.md", cwd=repo).returncode == 0
+    (repo / ".gitignore").write_text("results/\n", encoding="utf-8")
+    assert _git("add", "README.md", ".gitignore", cwd=repo).returncode == 0
     assert _git("commit", "-q", "-m", "init", cwd=repo).returncode == 0
     return repo
 
@@ -101,6 +102,19 @@ def test_scan_offline_demo_output_alone_is_not_live(tmp_path: Path) -> None:
 
     assert scan.live is False
     assert all(a.kind == "demo" for a in scan.artifacts)
+
+
+def test_scan_malformed_credential_row_is_live_fail_safe(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    (wt / "results").mkdir(parents=True)
+    (wt / "results" / "accounts.txt").write_text(
+        "truncated@example.com----only-two-fields\n", encoding="utf-8"
+    )
+
+    scan = scan_artifacts(wt)
+
+    assert scan.live is True
+    assert scan.artifacts[0].kind == "accounts"
 
 
 def test_scan_recurses_into_nested_run_output(tmp_path: Path) -> None:
@@ -171,6 +185,19 @@ def test_cli_remove_refuses_while_unarchived_live_artifacts_remain(tmp_path: Pat
     assert (wt / "results" / "accounts.txt").exists()
     assert (wt / "results" / "cookies" / "alice.json").exists()
     assert (wt / "results" / "pending_activation" / "bob.json").exists()
+
+
+def test_cli_remove_refuses_uncommitted_untracked_changes(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    wt = tmp_path / "wt"
+    _add_worktree(repo, wt, "wt-dirty")
+    (wt / "notes.txt").write_text("uncommitted work\n", encoding="utf-8")
+
+    result = _run_cli("remove", str(wt), cwd=tmp_path)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert wt.exists()
+    assert (wt / "notes.txt").exists()
 
 
 # --- real CLI: explicit archive ------------------------------------------

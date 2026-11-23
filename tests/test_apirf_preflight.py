@@ -212,13 +212,14 @@ def test_unavailable_apirf_path_is_a_blocking_failure(tmp_path):
     assert "Traceback" not in output
 
 
-def test_legacy_console_encoding_does_not_break_the_cli(tmp_path):
+def test_legacy_console_encoding_blocks_the_cli(tmp_path):
     with FakeThirdParty(HEALTHY_ROUTES) as fake:
         _write_config(tmp_path, fake.base_url)
         code, output = _run_cli(tmp_path, {"PYTHONIOENCODING": "gbk"})
 
-        assert code == 0, output
-        assert "RESULT: Preflight passed" in output
+        assert code != 0, output
+        assert "Console encoding" in output
+        assert "started without UTF-8" in output
         assert "Traceback" not in output
 
 
@@ -252,13 +253,16 @@ def test_console_check_flags_a_codepage_it_cannot_repair():
     assert result.hint
 
 
-def test_console_check_repairs_a_legacy_codepage_instead_of_failing():
+def test_console_check_repairs_for_printing_but_still_blocks():
     from core.preflight import check_console_encoding
 
     stdout, stderr = _Stream("gbk", repairable=True), _Stream("gbk", repairable=True)
     result = check_console_encoding(stdout=stdout, stderr=stderr)
 
-    assert result.ok is True
+    assert result.ok is False
+    assert "reconfigured for this process only" in result.detail
+    assert stdout.encoding == "utf-8"
+    assert stderr.encoding == "utf-8"
     assert "reconfigured" in result.detail.lower()
     assert stdout.reconfigured and stderr.reconfigured
 
@@ -308,8 +312,8 @@ def _settings(**overrides):
     return PreflightSettings(**values)
 
 
-@pytest.mark.parametrize("status", [200, 204, 400, 422])
-def test_mailbox_probe_treats_any_answer_past_auth_as_accepted(status):
+@pytest.mark.parametrize("status", [200, 204])
+def test_mailbox_probe_accepts_only_explicit_success(status):
     from core.preflight import check_mailbox_probe
 
     result = check_mailbox_probe(_settings(), _Session(status))
@@ -317,7 +321,7 @@ def test_mailbox_probe_treats_any_answer_past_auth_as_accepted(status):
     assert result.ok is True, result.detail
 
 
-@pytest.mark.parametrize("status", [401, 403, 429, 404, 405, 500])
+@pytest.mark.parametrize("status", [400, 422, 401, 403, 429, 404, 405, 500])
 def test_mailbox_probe_treats_rejection_and_unusable_probes_as_blocking(status):
     from core.preflight import check_mailbox_probe
 
@@ -354,7 +358,7 @@ def test_apirf_probe_blocks_on_unusable_answers(status):
 # Structural guarantee: nothing but GET can leave the process
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("verb", ["post", "put", "patch", "delete"])
+@pytest.mark.parametrize("verb", ["request", "post", "put", "patch", "delete"])
 def test_read_only_session_refuses_mutating_verbs(verb):
     from core.preflight import ReadOnlySession, ReadOnlyViolation
 

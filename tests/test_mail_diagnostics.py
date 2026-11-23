@@ -180,6 +180,25 @@ def test_poll_collects_sanitized_rejection_diagnostics_and_emits_them():
     assert "evil.example" in emitted[0]
 
 
+def test_metadata_redacts_short_secret_query_values():
+    mailbox = FakeMailbox(messages=[{
+        "id": "short",
+        "subject": "Confirm https://apirf.ru/x?token=abc123&key=k9",
+        "from": "no-reply@apirf.ru",
+        "body": "https://evil.example/confirm/x",
+    }])
+    router = _router(mailbox)
+    router.create_mailbox()
+    router.mark_submitted()
+
+    assert router.poll_for_confirmation(timeout_secs=0.2, first_interval=0) is None
+
+    dumped = json.dumps(router.rejection_diagnostics, ensure_ascii=False)
+    assert "abc123" not in dumped
+    assert "token=<redacted>" in dumped
+    assert "key=<redacted>" in dumped
+
+
 def test_poll_success_emits_no_diagnostics():
     emitted = []
     mailbox = FakeMailbox(messages=[{
