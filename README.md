@@ -264,6 +264,13 @@ python main.py --run target_service
 python main.py --run demo --cdp http://127.0.0.1:9222
 ```
 
+### APIrf 实跑前只读预检 (preflight)
+在启动 APIrf 真实注册之前，用一条命令确认本机已就绪：控制台 UTF-8 编码、215.im 凭据（只读接口探测）、APIrf 网络路径（只读端点探测）。全程只发 GET 请求，绝不创建访客、升级或注册任何账号；出现阻断性问题时以非零码退出：
+```bash
+python main.py preflight
+```
+探测端点与超时可在 `config.json` 的 `apirf.preflight` 中调整（见 `config.example.json`）。
+
 ### 密码库资产标准导出
 将测试产出的账号资产一键转换为标准格式：
 ```bash

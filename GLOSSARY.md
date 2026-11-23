@@ -47,3 +47,7 @@ _Avoid_: Arbitrary mailbox retry, public temporary-mail fallback, fabricated loc
 **Cookie Sidecar**:
 The per-account standard Cookie JSON array written under `results/cookies/` from the same HTTP session used for registration and identity verification.
 _Avoid_: Browser storage state, account-ledger delimiter payload
+
+**Preflight**:
+The read-only readiness check run before an APIrf live run (`python main.py preflight`): console UTF-8 encoding, the 215.im credential through a read-only inbox-listing probe, and the APIrf network path through an unauthenticated read-only endpoint. Every third-party request is a GET enforced by a session guard; a blocking failure exits non-zero. No guest, upgrade or registration is ever invoked.
+_Avoid_: Dry-run registration, trial account creation, environment doctor
