@@ -187,6 +187,14 @@ class ApirfAdapter(BaseSiteAdapter):
         # 4. Poll the pinned mailbox and follow only a strictly validated link.
         link = self.mail_router.poll_for_confirmation(timeout_secs=self.confirmation_timeout)
         if not link:
+            # Persist the sanitized rejection diagnostics so a received-but-
+            # unsupported confirmation email is reported immediately in the
+            # pending-activation record (provider, safe message metadata and
+            # rejection reasons; never tokens, credentials or bodies).
+            diagnostics = getattr(self.mail_router, "rejection_diagnostics", [])
+            if diagnostics:
+                self._set_pending("confirmation")
+                self.pending_activation["diagnostics"] = list(diagnostics)
             return False
         if not extract_apirf_confirmation_link(f'href="{link}"'):
             return False
