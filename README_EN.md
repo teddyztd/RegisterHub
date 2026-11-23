@@ -297,6 +297,17 @@ Execute the test suite to validate core heuristics, OpenCV solvers, and code sca
 pytest tests/
 ```
 
+### Development gates: CI & local pre-commit hook
+
+- **Continuous integration**: `.github/workflows/tests.yml` runs the same `python -m pytest` suite on every `push` / `pull_request` across a Python 3.10–3.13 matrix; a failing test blocks the merge.
+- **Local hook (opt-in)**: the repository ships `.githooks/pre-commit`. Enable it once to run the same test gate before every `git commit` (writes only this repo's `.git/config`, never global config):
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+  Bypass deliberately with `git commit --no-verify`. See [docs/development.md](docs/development.md).
+
 ---
 
 ## Disclaimer & Legal Notice

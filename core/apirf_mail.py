@@ -19,9 +19,10 @@ X-API-Key header (the key never appears in payloads or logs).
 """
 import html as html_module
 import re
+import sys
 import time
 import urllib.parse
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -32,12 +33,18 @@ from core.mail_client import (
 )
 
 # ---------------------------------------------------------------------------
-# Strict confirmation-link extraction
+# Strict confirmation-link extraction + sanitized rejection diagnostics
 # ---------------------------------------------------------------------------
 
 APIRF_CONFIRM_HOSTS = ("apirf.ru",)
 APIRF_CONFIRM_PATH = "/api/auth/email/confirm/"
 APIRF_CONFIRM_WEB_PATH = "/podtverdit"
+
+# Only http/https candidates count as confirmation-link attempts. Relative
+# hrefs, mailto:, tel:, javascript: and bare fragments are ordinary page
+# furniture, not the emailed confirmation link, so they are ignored rather than
+# reported as rejections.
+_LINK_SCHEMES = frozenset(("http", "https"))
 
 _LINK_HREF_RE = re.compile(
     r"""href\s*=\s*(?:
@@ -49,6 +56,139 @@ _LINK_HREF_RE = re.compile(
 )
 _PLAIN_URL_RE = re.compile(r"(?<![\w=?&])https://[^\s<>\"']+", re.IGNORECASE)
 
+# A long unbroken run of URL-safe characters is treated as an opaque secret
+# (confirmation token, API key...) and redacted wherever it could otherwise
+# surface: rejected path tails and safe message metadata. Secret-shaped query
+# parameters are redacted at any length via _SECRET_PARAM_RE.
+_TOKEN_RUN_RE = re.compile(r"[A-Za-z0-9_\-]{16,}")
+# Secret-bearing query parameters are redacted regardless of value length, so
+# a short token in ``?token=abc123`` cannot leak through safe metadata.
+_SECRET_PARAM_RE = re.compile(
+    r"(?i)\b(token|key|secret|code|password|pass|pwd)=([^&\s\"']+)"
+)
+_REDACTED = "<redacted>"
+
+# Envelope fields that are safe to report: they never carry the confirmation
+# token, the account password, a cookie value, or the message body.
+MESSAGE_METADATA_KEYS = ("subject", "from", "to", "date", "created_at", "received_at")
+
+
+def _iter_unescaped_candidates(text: str) -> List[str]:
+    """Return unique HTML-unescaped link candidates, in extractor order."""
+    if not text:
+        return []
+    raw_candidates: List[str] = [m.group(0) for m in _PLAIN_URL_RE.finditer(text)]
+    for match in _LINK_HREF_RE.finditer(text):
+        raw = (match.group("dq") or match.group("sq") or match.group("bare") or "").strip()
+        if raw:
+            raw_candidates.append(raw)
+    seen = set()
+    ordered: List[str] = []
+    for raw in raw_candidates:
+        candidate = html_module.unescape(raw)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        ordered.append(candidate)
+    return ordered
+
+
+def _redacted_path(parsed: "urllib.parse.SplitResult") -> str:
+    """Return a token-free view of a URL path.
+
+    The confirmation token lives either in the suffix after the confirm path or
+    in the web-form query string. The suffix is always redacted and the query is
+    never included; for any other multi-segment path the last segment is
+    redacted so a foreign ``/verify/<token>`` style link cannot leak a secret.
+    """
+    path = urllib.parse.unquote(parsed.path or "") or "/"
+    if path.startswith(APIRF_CONFIRM_PATH):
+        return APIRF_CONFIRM_PATH + _REDACTED
+    if path == APIRF_CONFIRM_WEB_PATH:
+        return path
+    segments = path.split("/")
+    if len(segments) > 2:
+        segments[-1] = _REDACTED
+        return "/".join(segments)
+    return path
+
+
+def _rejection(parsed: "urllib.parse.SplitResult", reason: str) -> Dict[str, str]:
+    """Build a safe rejection record: scheme, host and token-free path only."""
+    try:
+        host = parsed.hostname or ""
+    except ValueError:  # malformed authority in an untrusted email
+        host = ""
+    return {
+        "scheme": parsed.scheme or "",
+        "host": host,
+        "path": _redacted_path(parsed),
+        "reason": reason,
+    }
+
+
+def _classify_candidate(candidate: str) -> Tuple[Optional[str], Optional[Dict[str, str]]]:
+    """Classify one candidate: (accepted_url, None) or (None, safe rejection)."""
+    parsed = urllib.parse.urlsplit(candidate)
+    if parsed.scheme != "https":
+        return None, _rejection(parsed, "scheme_not_https")
+    if parsed.hostname not in APIRF_CONFIRM_HOSTS:
+        return None, _rejection(parsed, "host_not_allowed")
+    if parsed.username or parsed.password:
+        return None, _rejection(parsed, "credentials_in_url")
+    try:
+        port = parsed.port
+    except ValueError:  # malformed port in an untrusted email
+        return None, _rejection(parsed, "malformed_port")
+    if port is not None and port != 443:
+        return None, _rejection(parsed, "unexpected_port")
+
+    path = urllib.parse.unquote(parsed.path or "")
+    if path.startswith(APIRF_CONFIRM_PATH):
+        token = path[len(APIRF_CONFIRM_PATH):]
+        if not token:
+            return None, _rejection(parsed, "missing_token")
+        if "/" in token:
+            return None, _rejection(parsed, "malformed_token")
+        return candidate, None
+
+    # The live email links to the web form /podtverdit?token=... rather than the
+    # API path. Normalize it to the canonical API confirmation URL so the
+    # adapter's GET performs the actual confirmation, and reject a missing token
+    # or a token containing path separators.
+    if path == APIRF_CONFIRM_WEB_PATH:
+        query = urllib.parse.parse_qs(parsed.query or "")
+        token = (query.get("token") or [""])[0]
+        if not token:
+            return None, _rejection(parsed, "missing_token")
+        if "/" in token:
+            return None, _rejection(parsed, "malformed_token")
+        return (
+            f"https://{parsed.hostname}{APIRF_CONFIRM_PATH}"
+            f"{urllib.parse.quote(token, safe='')}"
+        ), None
+
+    return None, _rejection(parsed, "unexpected_path")
+
+
+def analyze_apirf_confirmation_links(text: str) -> Tuple[Optional[str], List[Dict[str, str]]]:
+    """Return ``(confirmation_url, rejections)`` for one email body.
+
+    ``confirmation_url`` is the first accepted APIrf confirmation link, or None.
+    When no link is accepted, ``rejections`` holds one safe record per
+    unsupported http(s) candidate, naming the rejected scheme, host and
+    token-free path plus a machine-readable reason. Tokens, credentials, query
+    values and the message body are never included.
+    """
+    rejections: List[Dict[str, str]] = []
+    for candidate in _iter_unescaped_candidates(text):
+        link, rejection = _classify_candidate(candidate)
+        if link is not None:
+            return link, []
+        if rejection is not None:
+            rejections.append(rejection)
+    return None, rejections
+
 
 def extract_apirf_confirmation_link(text: str) -> Optional[str]:
     """Return the single APIrf email-confirmation URL, or None.
@@ -58,53 +198,65 @@ def extract_apirf_confirmation_link(text: str) -> Optional[str]:
     prefix and a non-empty token. Redirectors, trackers, www variants, other
     ports/paths, credentials-in-URL and unrelated links are all rejected.
     """
-    if not text:
-        return None
+    return analyze_apirf_confirmation_links(text)[0]
 
-    candidates: List[str] = [m.group(0) for m in _PLAIN_URL_RE.finditer(text)]
-    for match in _LINK_HREF_RE.finditer(text):
-        raw = (match.group("dq") or match.group("sq") or match.group("bare") or "").strip()
-        if raw:
-            candidates.append(raw)
 
-    for raw in candidates:
-        candidate = html_module.unescape(raw)
-        parsed = urllib.parse.urlsplit(candidate)
+# ---------------------------------------------------------------------------
+# Sanitized polling diagnostics
+# ---------------------------------------------------------------------------
 
-        if parsed.scheme != "https":
-            continue
-        if parsed.hostname not in APIRF_CONFIRM_HOSTS:
-            continue
-        if parsed.username or parsed.password:
-            continue
-        try:
-            if parsed.port is not None and parsed.port != 443:
-                continue
-        except ValueError:  # malformed port in an untrusted email
-            continue
-        path = urllib.parse.unquote(parsed.path or "")
-        if path.startswith(APIRF_CONFIRM_PATH):
-            token = path[len(APIRF_CONFIRM_PATH):]
-            if token and "/" not in token:
-                return candidate
-            continue
+def _redact_token_runs(value: Any) -> Any:
+    if isinstance(value, str):
+        value = _SECRET_PARAM_RE.sub(
+            lambda match: match.group(1) + "=" + _REDACTED, value
+        )
+        return _TOKEN_RUN_RE.sub(_REDACTED, value)
+    return value
 
-        # The live email links to the web form /podtverdit?token=... rather
-        # than the API path. Normalize it to the canonical API confirmation
-        # URL so the adapter's GET performs the actual confirmation, and
-        # reject a missing token or a token containing path separators.
-        if path == APIRF_CONFIRM_WEB_PATH:
-            query = urllib.parse.parse_qs(parsed.query or "")
-            token = (query.get("token") or [""])[0]
-            if token and "/" not in token:
-                return (
-                    f"https://{parsed.hostname}{APIRF_CONFIRM_PATH}"
-                    f"{urllib.parse.quote(token, safe='')}"
-                )
 
-        continue
+def _safe_message_metadata(message: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    for key in MESSAGE_METADATA_KEYS:
+        value = message.get(key)
+        if value:
+            metadata[key] = _redact_token_runs(str(value))
+    return metadata
 
-    return None
+
+def format_rejection_diagnostic(diagnostic: Dict[str, Any]) -> str:
+    """Render one sanitized rejection diagnostic as a printable report block."""
+    provider = diagnostic.get("provider") or "unknown"
+    message_id = diagnostic.get("message_id")
+    metadata = diagnostic.get("metadata") or {}
+
+    header = f"[mailbox] {provider}: received message"
+    if message_id:
+        header += f" {message_id}"
+    header += " but no supported confirmation link"
+
+    details: List[str] = []
+    for key in MESSAGE_METADATA_KEYS:
+        value = metadata.get(key)
+        if value:
+            details.append(f"{key}={value!r}")
+    if details:
+        header += " (" + ", ".join(details) + ")"
+
+    lines = [header]
+    for rejection in diagnostic.get("rejections") or []:
+        scheme = rejection.get("scheme") or ""
+        host = rejection.get("host") or ""
+        path = rejection.get("path") or ""
+        if scheme or host:
+            target = f"{scheme}://{host}{path}"
+        else:
+            target = path
+        lines.append(f"  rejected {rejection.get('reason', 'unknown')}: {target}")
+    return "\n".join(lines)
+
+
+def _default_reporter(line: str) -> None:
+    print(line, file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +394,8 @@ class ApirfMailRouter:
                  sleeper: Callable[[float], None] = time.sleep,
                  provider_order: Optional[List[str]] = None,
                  proxies: Optional[Dict[str, str]] = None,
-                 timeout: int = 20, trust_env: bool = True):
+                 timeout: int = 20, trust_env: bool = True,
+                 reporter: Optional[Callable[[str], None]] = None):
         self._factories = {
             **self.default_factories(proxies, timeout, trust_env),
             **(factories or {}),
@@ -253,10 +406,15 @@ class ApirfMailRouter:
             raise MailboxError(f"Unknown mailbox providers: {unknown}; allowed: {PROVIDER_ORDER}")
         self._order = names
         self._sleeper = sleeper
+        self._reporter = reporter if reporter is not None else _default_reporter
         self._mailbox: Optional[Any] = None
         self._submitted = False
         self.provider: Optional[str] = None
         self.active_address: Optional[str] = None
+        # Sanitized diagnostics for messages received but rejected during the
+        # most recent poll. Reset at the start of every poll; tokens, bodies
+        # and credentials never enter these records.
+        self.rejection_diagnostics: List[Dict[str, Any]] = []
 
     @staticmethod
     def default_factories(proxies: Optional[Dict[str, str]], timeout: int,
@@ -331,6 +489,7 @@ class ApirfMailRouter:
         deadline = time.time() + timeout_secs
         interval = first_interval
         processed_message_ids = set()
+        self.rejection_diagnostics = []
 
         while time.time() < deadline:
             try:
@@ -350,9 +509,18 @@ class ApirfMailRouter:
                 if not body:
                     continue
                 processed_message_ids.add(message_id)
-                link = extract_apirf_confirmation_link(body)
+                link, rejections = analyze_apirf_confirmation_links(body)
                 if link:
                     return link
+                if rejections:
+                    diagnostic = {
+                        "provider": self.provider,
+                        "message_id": message_id,
+                        "metadata": _safe_message_metadata(message),
+                        "rejections": rejections,
+                    }
+                    self.rejection_diagnostics.append(diagnostic)
+                    self._reporter(format_rejection_diagnostic(diagnostic))
             self._sleeper(interval)
             interval = min(interval * 1.3, max_interval)
 

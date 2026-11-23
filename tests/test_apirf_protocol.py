@@ -49,6 +49,7 @@ class FakeMailRouter:
         self.submitted = False
         self.create_calls = 0
         self.poll_calls = 0
+        self.rejection_diagnostics = []
 
     def create_mailbox(self):
         self.create_calls += 1

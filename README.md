@@ -264,6 +264,13 @@ python main.py --run target_service
 python main.py --run demo --cdp http://127.0.0.1:9222
 ```
 
+### APIrf 实跑前只读预检 (preflight)
+在启动 APIrf 真实注册之前，用一条命令确认本机已就绪：控制台 UTF-8 编码、215.im 凭据（只读接口探测）、APIrf 网络路径（只读端点探测）。全程只发 GET 请求，绝不创建访客、升级或注册任何账号；出现阻断性问题时以非零码退出：
+```bash
+python main.py preflight
+```
+探测端点与超时可在 `config.json` 的 `apirf.preflight` 中调整（见 `config.example.json`）。
+
 ### 密码库资产标准导出
 将测试产出的账号资产一键转换为标准格式：
 ```bash
@@ -296,6 +303,17 @@ RegisterHub 针对自主编程智能体进行了全流程规范定义。根目�
 ```bash
 pytest tests/
 ```
+
+### 开发门禁：CI 与本地 pre-commit 钩子
+
+- **持续集成**：`.github/workflows/tests.yml` 在每次 `push` / `pull_request` 上于 Python 3.10–3.13 矩阵运行同一套 `python -m pytest`，测试失败即阻断合并。
+- **本地钩子（可选）**：仓库自带 `.githooks/pre-commit`，一次性启用后，每次 `git commit` 前自动运行同一测试门禁（仅写入本仓库 `.git/config`，不改全局配置）：
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+  需要时可用 `git commit --no-verify` 显式绕过。详见 [docs/development.md](docs/development.md)。
 
 ---
 

@@ -38,6 +38,16 @@ def run_doctor():
     return _doctor(output_dir=output_dir)
 
 
+def run_preflight():
+    """Run the read-only APIrf live-run preflight.
+
+    Delegates to core.preflight, which issues only GET requests. Nothing here
+    may create, upgrade or register an account.
+    """
+    from core.preflight import run_preflight as _preflight
+    return _preflight(load_config())
+
+
 def inspect_url(target_url: str, cdp_endpoint: str = None):
     from playwright.sync_api import sync_playwright
     from core.stealth import apply_stealth_to_context, connect_fingerprint_browser
@@ -181,6 +191,14 @@ def main():
         # scripts can gate on the real environment state.
         ok = run_doctor()
         if not ok:
+            sys.exit(1)
+        return
+
+    if args.command == "preflight":
+        # Read-only readiness report. Exit non-zero on blocking failures so a
+        # wrapper script can refuse to start a live run, and so an unknown
+        # subcommand typo cannot silently fall through to the demo adapter.
+        if not run_preflight():
             sys.exit(1)
         return
 
