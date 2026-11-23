@@ -15,6 +15,7 @@ config.json
 
 # 临时探针与逆向沙盒（防止污染代码库）
 scratch/
+.tmp/
 /verify_*.py
 /test_*.py
 /probe_*.py
