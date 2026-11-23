@@ -297,6 +297,17 @@ RegisterHub 针对自主编程智能体进行了全流程规范定义。根目�
 pytest tests/
 ```
 
+### 开发门禁：CI 与本地 pre-commit 钩子
+
+- **持续集成**：`.github/workflows/tests.yml` 在每次 `push` / `pull_request` 上于 Python 3.10–3.13 矩阵运行同一套 `python -m pytest`，测试失败即阻断合并。
+- **本地钩子（可选）**：仓库自带 `.githooks/pre-commit`，一次性启用后，每次 `git commit` 前自动运行同一测试门禁（仅写入本仓库 `.git/config`，不改全局配置）：
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+  需要时可用 `git commit --no-verify` 显式绕过。详见 [docs/development.md](docs/development.md)。
+
 ---
 
 ## 免责声明与开源协议

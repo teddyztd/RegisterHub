@@ -1,0 +1,12 @@
+#!/bin/sh
+# Repository-provided pre-commit hook (opt-in).
+#
+# One-time opt-in (writes to this repo's local .git/config only, never global):
+#   git config core.hooksPath .githooks
+#
+# Runs the same quick pytest gate that CI enforces before allowing a commit.
+# Bypass deliberately, when needed, with: git commit --no-verify
+set -e
+
+echo "pre-commit: running pytest gate" >&2
+python -m pytest
