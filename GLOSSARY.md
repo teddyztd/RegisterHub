@@ -51,3 +51,8 @@ _Avoid_: Browser storage state, account-ledger delimiter payload
 **Rejection Diagnostics**:
 The sanitized record emitted when mailbox polling receives a message that contains no supported confirmation link: provider, safe message metadata, and per-link rejection reasons (scheme, host, token-free path). Tokens, credentials, cookie values and message bodies are never included.
 _Avoid_: Raw email body, error dump, credential echo
+
+**Preflight**:
+The read-only readiness check run before an APIrf live run (`python main.py preflight`): console UTF-8 encoding, the 215.im credential through a read-only inbox-listing probe, and the APIrf network path through an unauthenticated read-only endpoint. Every third-party request is a GET enforced by a session guard; a blocking failure exits non-zero. No guest, upgrade or registration is ever invoked.
+_Avoid_: Dry-run registration, trial account creation, environment doctor
+>>>>>>> ticket/12-apirf-preflight

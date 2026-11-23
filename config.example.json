@@ -19,6 +19,13 @@
       "im215_api_key": "",
       "http_timeout_secs": 20,
       "confirmation_timeout_secs": 300
+    },
+    "preflight": {
+      "im215_base_url": "https://maliapi.215.im/v1",
+      "im215_probe_path": "/messages",
+      "apirf_base_url": "https://apirf.ru",
+      "apirf_probe_path": "/api/auth/me",
+      "timeout_secs": 20
     }
   },
   "defaults": {
